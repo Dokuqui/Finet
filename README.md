@@ -20,12 +20,18 @@ It helps you organize your finances, track expenses, set budgets, and visualize 
    cd Finet
    ```
 
-2. **Install dependencies:**
+2. **Create and activate a virtual environment (recommended)**
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
+
+3. **Install dependencies:**
    ```bash
    pip install -r requirements.txt
    ```
 
-3. **Run the app:**
+4. **Run the app:**
    ```bash
    python app/main.py
    ```
