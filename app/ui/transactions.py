@@ -576,112 +576,129 @@ def transactions_page(page: ft.Page):
     )
 
     # --- UI layout ---
-    list_category_btn = ft.IconButton(
+    list_category_btn = ft.ElevatedButton(
+        "Show Categories",
         icon=ft.Icons.LIST,
         tooltip="Show Categories",
         on_click=open_list_dialog,
         style=ft.ButtonStyle(
             color=ft.Colors.BLUE_400,
             bgcolor=ft.Colors.GREY_50,
-            shape=ft.RoundedRectangleBorder(radius=18),
+            shape=ft.RoundedRectangleBorder(radius=14),
         ),
-        width=38,
+        width=145,
         height=38,
     )
-    
+
     add_category_btn = ft.ElevatedButton(
         "Add Category",
         icon=ft.Icons.ADD,
+        tooltip="Add Category",
         on_click=open_add_dialog,
         style=ft.ButtonStyle(
             bgcolor=ft.Colors.BLUE_400,
             color=ft.Colors.WHITE,
             shape=ft.RoundedRectangleBorder(radius=14),
         ),
-        width=135,
+        width=145,
         height=38,
     )
 
     refresh_categories()
     refresh_transactions()
-    
-    category_controls_row = ft.Row(
-        [add_category_btn, list_category_btn],
-        alignment=ft.MainAxisAlignment.START,
-        spacing=12,
-    )
-    
-    category_controls_panel = ft.Container(
-        content=category_controls_row,
-        alignment=ft.alignment.center_left,
-        padding=ft.padding.only(left=32, top=18, bottom=10),
-        width=760,
+
+    category_panel = ft.Container(
+        ft.Column(
+            [add_category_btn, list_category_btn],
+            spacing=22,
+            alignment=ft.MainAxisAlignment.START,
+        ),
+        bgcolor=ft.Colors.WHITE,
+        border_radius=18,
+        shadow=ft.BoxShadow(
+            spread_radius=2,
+            blur_radius=14,
+            color=ft.Colors.GREY_100,
+            offset=ft.Offset(0, 4),
+        ),
+        padding=ft.padding.only(top=32, left=22, right=22),
+        width=180,
+        margin=ft.margin.only(top=38, right=32, bottom=38),
+        alignment=ft.alignment.top_right,
     )
 
-    form = ft.Container(
-        ft.Column(
-            [
-                ft.Text(
-                    "Add Transaction",
-                    style="headlineSmall",
-                    size=28,
-                    weight=ft.FontWeight.BOLD,
-                    color=ft.Colors.GREY_900,
+    main_col = ft.Column(
+        [
+            ft.Container(
+                ft.Column(
+                    [
+                        ft.Text(
+                            "Add Transaction",
+                            style="headlineSmall",
+                            size=28,
+                            weight=ft.FontWeight.BOLD,
+                            color=ft.Colors.GREY_900,
+                        ),
+                        ft.Row(
+                            [date_btn, selected_date],
+                            alignment=ft.MainAxisAlignment.CENTER,
+                            spacing=14,
+                        ),
+                        ft.Row(
+                            [amount_field, less_btn, more_btn],
+                            alignment=ft.MainAxisAlignment.CENTER,
+                            spacing=14,
+                        ),
+                        ft.Row(
+                            [category_field, account_field, currency_field],
+                            alignment=ft.MainAxisAlignment.CENTER,
+                            spacing=14,
+                        ),
+                        notes_field,
+                        ft.Container(
+                            add_button,
+                            alignment=ft.alignment.center,
+                            margin=ft.margin.only(top=30),
+                        ),
+                    ],
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                    spacing=22,
                 ),
-                ft.Row(
-                    [date_btn, selected_date],
-                    alignment=ft.MainAxisAlignment.CENTER,
-                    spacing=14,
+                alignment=ft.alignment.center,
+                bgcolor=ft.Colors.WHITE,
+                border_radius=22,
+                shadow=ft.BoxShadow(
+                    spread_radius=3,
+                    blur_radius=18,
+                    color=ft.Colors.GREY_100,
+                    offset=ft.Offset(0, 8),
                 ),
-                ft.Row(
-                    [amount_field, less_btn, more_btn],
-                    alignment=ft.MainAxisAlignment.CENTER,
-                    spacing=14,
-                ),
-                ft.Row(
-                    [category_field, account_field, currency_field],
-                    alignment=ft.MainAxisAlignment.CENTER,
-                    spacing=14,
-                ),
-                notes_field,
-                ft.Container(
-                    add_button,
-                    alignment=ft.alignment.center,
-                    margin=ft.margin.only(top=30),
-                ),
-            ],
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-            spacing=22,
-        ),
-        alignment=ft.alignment.center,
-        bgcolor=ft.Colors.WHITE,
-        border_radius=22,
-        shadow=ft.BoxShadow(
-            spread_radius=3,
-            blur_radius=18,
-            color=ft.Colors.GREY_100,
-            offset=ft.Offset(0, 8),
-        ),
-        padding=ft.padding.all(38),
-        margin=ft.margin.only(top=10, bottom=16),
-        width=720,
+                padding=ft.padding.all(38),
+                margin=ft.margin.only(top=10, bottom=16),
+                width=720,
+            ),
+            ft.Divider(color=ft.Colors.GREY_100, height=2),
+            ft.Container(
+                transaction_list,
+                alignment=ft.alignment.center,
+                padding=ft.padding.only(top=32, bottom=28),
+                width=700,
+            ),
+        ],
+        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+        expand=True,
+        spacing=0,
+        scroll="auto"
     )
 
     return ft.Container(
-        content=ft.Column(
+        content=ft.Row(
             [
-                category_controls_panel,
-                form,
-                ft.Divider(color=ft.Colors.GREY_100, height=2),
-                ft.Container(
-                    transaction_list,
-                    alignment=ft.alignment.center,
-                    padding=ft.padding.only(top=32, bottom=28),
-                    width=700,
-                ),
+                main_col,
+                category_panel,
             ],
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-            scroll="auto",
+            alignment=ft.MainAxisAlignment.CENTER,
+            vertical_alignment=ft.CrossAxisAlignment.START,
         ),
         expand=True,
         alignment=ft.alignment.top_center,
