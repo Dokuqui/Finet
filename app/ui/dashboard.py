@@ -54,7 +54,7 @@ def dashboard_page(page: ft.Page):
                 [
                     ft.Text(tx.date, style="bodyMedium", color=ft.Colors.GREY_700, width=90),
                     ft.Text(f"{tx.amount:.2f} {tx.currency}", style="bodyMedium", color=ft.Colors.BLUE_400 if tx.amount > 0 else ft.Colors.RED_400, width=100),
-                    ft.Text(tx.category, style="bodyMedium", width=110),
+                    ft.Text(getattr(tx, "category_name", "Other"), style="bodyMedium", width=110),
                     ft.Text(f"Account: {tx.account_id}", style="bodyMedium", color=ft.Colors.GREY_600, width=120),
                 ],
                 spacing=18,
