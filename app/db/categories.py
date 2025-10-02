@@ -23,3 +23,11 @@ def update_category(category_id, name, icon="Other"):
     conn.execute("UPDATE categories SET name = ?, icon = ? WHERE id = ?", (name, icon, category_id))
     conn.commit()
     conn.close()
+    
+def get_category_id_by_name(name):
+    conn = get_db_connection()
+    row = conn.execute("SELECT id FROM categories WHERE name = ?", (name,)).fetchone()
+    conn.close()
+    if row:
+        return row["id"] if "id" in row.keys() else row[0]
+    return None
