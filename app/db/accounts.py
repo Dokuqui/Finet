@@ -47,7 +47,7 @@ def add_account_balance(account_id, currency, delta):
     # Check if exists
     row = conn.execute(
         "SELECT balance FROM account_balances WHERE account_id=? AND currency=?",
-        (account_id, currency)
+        (account_id, currency),
     ).fetchone()
     current = row["balance"] if row else 0.0
     new_balance = current + delta
@@ -109,6 +109,7 @@ def get_accounts():
         results.append(Account.from_row(acc, balances=[dict(b) for b in balances]))
     conn.close()
     return results
+
 
 def increment_account_balance(account_id, currency, delta):
     conn = get_db_connection()

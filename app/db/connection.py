@@ -3,11 +3,13 @@ import os
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "finet.db")
 
+
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
+
 
 def init_db():
     conn = get_db_connection()
@@ -54,6 +56,18 @@ def init_db():
             FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL
         )
     """)
+    # Budgets table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS budgets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            category_id INTEGER NOT NULL,
+            period TEXT NOT NULL,           -- 'monthly' or 'weekly'
+            amount REAL NOT NULL,
+            start_date TEXT NOT NULL,       -- ISO format string
+            end_date TEXT NOT NULL,
+            FOREIGN KEY(category_id) REFERENCES categories(id) ON DELETE CASCADE
+        )
+    """)
     # Migrations table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS migrations (
@@ -65,12 +79,18 @@ def init_db():
     conn.commit()
     conn.close()
 
+
 def apply_migration(migration_name, sql):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM migrations WHERE migration=?", (migration_name,))
+    cursor.execute(
+        "SELECT COUNT(*) FROM migrations WHERE migration=?", (migration_name,)
+    )
     if cursor.fetchone()[0] == 0:
         cursor.executescript(sql)
-        cursor.execute("INSERT INTO migrations (migration, applied_at) VALUES (?, datetime('now'))", (migration_name,))
+        cursor.execute(
+            "INSERT INTO migrations (migration, applied_at) VALUES (?, datetime('now'))",
+            (migration_name,),
+        )
         conn.commit()
     conn.close()
