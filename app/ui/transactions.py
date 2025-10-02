@@ -1,3 +1,4 @@
+import csv
 import datetime
 import flet as ft
 from app.db.transactions import (
@@ -10,6 +11,7 @@ from app.db.categories import (
     get_categories,
     add_category,
     delete_category,
+    get_category_id_by_name,
     update_category,
 )
 
@@ -71,6 +73,9 @@ def transactions_page(page: ft.Page):
         border_radius=8,
         border_color=ft.Colors.GREY_400,
     )
+    
+    file_picker = ft.FilePicker()
+    page.overlay.append(file_picker)
 
     def on_add_icon_change(e):
         add_icon_preview.name = get_icon_by_name(add_icon_dropdown.value)
@@ -574,6 +579,70 @@ def transactions_page(page: ft.Page):
         width=210,
         height=44,
     )
+    def export_transactions_to_csv(path):
+        if not path:
+            page.snack_bar = ft.SnackBar(ft.Text("Export cancelled or invalid path!"))
+            page.update()
+            print("Export cancelled or invalid path!")
+            return
+        try:
+            txs = get_recent_transactions(limit=10000)
+            with open(path, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(['date', 'amount', 'category', 'account', 'notes', 'currency'])
+                for tx in txs:
+                    writer.writerow([
+                        tx.date, tx.amount, tx.category_name, tx.account_id, tx.notes, tx.currency
+                    ])
+            page.snack_bar = ft.SnackBar(ft.Text(f"Exported to {path}"))
+            page.update()
+            print(f"Exported {len(txs)} transactions to {path}")
+        except Exception as ex:
+            page.snack_bar = ft.SnackBar(ft.Text(f"Export error: {ex}"))
+            page.update()
+            print(f"Export error: {ex}")
+
+    def import_transactions_from_csv(path):
+        if not path:
+            page.snack_bar = ft.SnackBar(ft.Text("No file selected for import!"))
+            page.update()
+            print("No file selected for import!")
+            return
+        try:
+            imported = 0
+            skipped = 0
+            with open(path, 'r', encoding='utf-8') as csvfile:
+                reader = csv.DictReader(csvfile)
+                for row in reader:
+                    category_id = get_category_id_by_name(row['category'])
+                    if category_id is None:
+                        print(f"Category not found: {row['category']}, using 'Other'")
+                        category_id = get_category_id_by_name("Other")
+                        skipped += 1
+                    try:
+                        add_transaction(
+                            row['date'],
+                            float(row['amount']),
+                            category_id,
+                            int(row['account']),
+                            row.get('notes', ''),
+                            row['currency']
+                        )
+                        imported += 1
+                    except Exception as tx_ex:
+                        print(f"Import failed for row: {row} with error: {tx_ex}")
+                        skipped += 1
+            refresh_transactions()
+            page.snack_bar = ft.SnackBar(ft.Text(f"CSV Import finished! Imported: {imported}, Skipped: {skipped}"))
+            page.update()
+            print(f"CSV Import finished! Imported: {imported}, Skipped: {skipped}")
+        except Exception as ex:
+            page.snack_bar = ft.SnackBar(ft.Text(f"CSV Import error: {ex}"))
+            page.update()
+            print(f"CSV Import error: {ex}")
+
+    file_picker.on_save = lambda e: export_transactions_to_csv(e.path)
+    file_picker.on_result = lambda e: import_transactions_from_csv(e.files[0].path if e.files and e.files[0].path else None)
 
     # --- UI layout ---
     list_category_btn = ft.ElevatedButton(
@@ -603,13 +672,41 @@ def transactions_page(page: ft.Page):
         width=145,
         height=38,
     )
+    
+    import_btn = ft.ElevatedButton(
+        "Import CSV",
+        icon=ft.Icons.FILE_UPLOAD,
+        tooltip="Import Transactions from CSV",
+        on_click=lambda e: file_picker.pick_files(allow_multiple=False, allowed_extensions=["csv"]),
+        style=ft.ButtonStyle(
+            bgcolor=ft.Colors.GREY_50,
+            color=ft.Colors.BLUE_400,
+            shape=ft.RoundedRectangleBorder(radius=14),
+        ),
+        width=145,
+        height=38,
+    )
+
+    export_btn = ft.ElevatedButton(
+        "Export CSV",
+        icon=ft.Icons.FILE_DOWNLOAD,
+        tooltip="Export Transactions to CSV",
+        on_click=lambda e: file_picker.save_file(file_name="transactions.csv", allowed_extensions=["csv"]),
+        style=ft.ButtonStyle(
+            bgcolor=ft.Colors.GREY_50,
+            color=ft.Colors.BLUE_400,
+            shape=ft.RoundedRectangleBorder(radius=14),
+        ),
+        width=145,
+        height=38,
+    )
 
     refresh_categories()
     refresh_transactions()
 
     category_panel = ft.Container(
         ft.Column(
-            [add_category_btn, list_category_btn],
+            [add_category_btn, list_category_btn, import_btn, export_btn],
             spacing=22,
             alignment=ft.MainAxisAlignment.START,
         ),
