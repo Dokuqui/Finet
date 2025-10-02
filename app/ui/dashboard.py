@@ -2,6 +2,7 @@ import flet as ft
 from app.db.transactions import get_recent_transactions
 from app.db.accounts import get_accounts
 
+
 def dashboard_page(page: ft.Page):
     accounts = get_accounts()
     balances_cards = [
@@ -18,7 +19,9 @@ def dashboard_page(page: ft.Page):
                         ft.Text(
                             f"{b['currency']}: {b['balance']:.2f}",
                             style="bodyMedium",
-                            color=ft.Colors.BLUE_400 if float(b["balance"]) >= 0 else ft.Colors.RED_400,
+                            color=ft.Colors.BLUE_400
+                            if float(b["balance"]) >= 0
+                            else ft.Colors.RED_400,
                         )
                         for b in acc.balances
                     ],
@@ -48,37 +51,62 @@ def dashboard_page(page: ft.Page):
     )
 
     transactions = get_recent_transactions(5)
-    recent_tx_controls = [
-        ft.Container(
-            ft.Row(
-                [
-                    ft.Text(tx.date, style="bodyMedium", color=ft.Colors.GREY_700, width=90),
-                    ft.Text(f"{tx.amount:.2f} {tx.currency}", style="bodyMedium", color=ft.Colors.BLUE_400 if tx.amount > 0 else ft.Colors.RED_400, width=100),
-                    ft.Text(getattr(tx, "category_name", "Other"), style="bodyMedium", width=110),
-                    ft.Text(f"Account: {tx.account_id}", style="bodyMedium", color=ft.Colors.GREY_600, width=120),
-                ],
-                spacing=18,
-            ),
-            padding=ft.padding.only(top=8, bottom=8),
-            bgcolor=ft.Colors.GREY_50,
-            border_radius=8,
-            margin=ft.margin.only(bottom=6),
-        )
-        for tx in transactions
-    ] if transactions else [
-        ft.Container(
-            ft.Text(
-                "No transactions found. Add your first transaction above!",
-                italic=True,
-                color=ft.Colors.GREY_600,
-            ),
-            padding=16,
-            bgcolor=ft.Colors.GREY_100,
-            border_radius=10,
-            alignment=ft.alignment.center,
-            margin=ft.margin.only(top=8, bottom=8),
-        )
-    ]
+    recent_tx_controls = (
+        [
+            ft.Container(
+                ft.Row(
+                    [
+                        ft.Text(
+                            tx.date,
+                            style="bodyMedium",
+                            color=ft.Colors.GREY_700,
+                            width=90,
+                        ),
+                        ft.Text(
+                            f"{tx.amount:.2f} {tx.currency}",
+                            style="bodyMedium",
+                            color=ft.Colors.BLUE_400
+                            if tx.amount > 0
+                            else ft.Colors.RED_400,
+                            width=100,
+                        ),
+                        ft.Text(
+                            getattr(tx, "category_name", "Other"),
+                            style="bodyMedium",
+                            width=110,
+                        ),
+                        ft.Text(
+                            f"Account: {tx.account_id}",
+                            style="bodyMedium",
+                            color=ft.Colors.GREY_600,
+                            width=120,
+                        ),
+                    ],
+                    spacing=18,
+                ),
+                padding=ft.padding.only(top=8, bottom=8),
+                bgcolor=ft.Colors.GREY_50,
+                border_radius=8,
+                margin=ft.margin.only(bottom=6),
+            )
+            for tx in transactions
+        ]
+        if transactions
+        else [
+            ft.Container(
+                ft.Text(
+                    "No transactions found. Add your first transaction above!",
+                    italic=True,
+                    color=ft.Colors.GREY_600,
+                ),
+                padding=16,
+                bgcolor=ft.Colors.GREY_100,
+                border_radius=10,
+                alignment=ft.alignment.center,
+                margin=ft.margin.only(top=8, bottom=8),
+            )
+        ]
+    )
 
     main_card = ft.Container(
         ft.Column(
