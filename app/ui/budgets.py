@@ -92,7 +92,7 @@ def budgets_page(page: ft.Page):
         label="Budget Amount",
         keyboard_type="number",
         width=150,
-        tooltip="Numeric amount (e.g. 250.00)",
+        tooltip="Positive number (e.g. 250.00)",
     )
     start_field = ft.TextField(label="Start (YYYY-MM-DD)", width=150, visible=False)
     end_field = ft.TextField(label="End (YYYY-MM-DD)", width=150, visible=False)
@@ -132,13 +132,11 @@ def budgets_page(page: ft.Page):
     def update_form_visibility():
         p = period_field.value
         if p == "custom":
-            # Show fields as editable
             start_field.visible = True
             end_field.visible = True
             start_field.disabled = False
             end_field.disabled = False
         else:
-            # Auto-generate dates and hide manual edit (still display as read-only summary)
             if p == "monthly":
                 s, e_ = month_range(today())
             elif p == "weekly":
@@ -197,7 +195,6 @@ def budgets_page(page: ft.Page):
             s_val = edit_start.value.strip()
             e_val = edit_end.value.strip()
             if per in ("monthly", "weekly") and (not s_val or not e_val):
-                # Regenerate if missing (fallback)
                 if per == "monthly":
                     s, ee = month_range(today())
                 else:
@@ -263,7 +260,6 @@ def budgets_page(page: ft.Page):
     )
 
     def badge(percent: float):
-        # Tiers: <0.7 good, <0.85 okay, <1 near, >=1 exceeded
         if percent >= 1:
             txt, col, bg = "Exceeded", UX.DANGER, ft.Colors.RED_50
         elif percent >= 0.85:
@@ -288,11 +284,10 @@ def budgets_page(page: ft.Page):
             return UX.WARNING
         return UX.SUCCESS
 
-    # single alert per refresh
-    def show_overshoot_alert(cat_name, spent, amount):
+    def show_overshoot_alert(cat_name, spent_display, amount):
         dialog = ft.AlertDialog(
             title=ft.Text("Budget Limit Exceeded"),
-            content=ft.Text(f"{cat_name}\nSpent {spent:.2f} of {amount:.2f}"),
+            content=ft.Text(f"{cat_name}\nSpent {spent_display:.2f} of {amount:.2f}"),
             actions=[ft.TextButton("OK", on_click=lambda e: close_alert())],
             modal=True,
             open=True,
@@ -310,14 +305,15 @@ def budgets_page(page: ft.Page):
         refresh_budgets()
         snack("Budget deleted", UX.DANGER)
 
-    def build_budget_card(b: dict, spent: float, percent: float):
+    def build_budget_card(
+        b: dict, spent_positive: float, percent: float, raw_signed: float
+    ):
         color = progress_color(percent)
         pct_text = int(min(percent, 1) * 100)
         name = category_map.get(b["category_id"], "Unknown")
         per_label = b["period"].capitalize()
         badge_ctrl = badge(percent)
 
-        # Progress overlay
         prog_stack = ft.Stack(
             [
                 ft.ProgressBar(
@@ -329,7 +325,7 @@ def budgets_page(page: ft.Page):
                     border_radius=UX.R_SM,
                 ),
                 ft.Text(
-                    f"{pct_text}%  {spent:.2f}/{b['amount']:.2f}",
+                    f"{pct_text}%  {spent_positive:.2f}/{b['amount']:.2f}",
                     size=12,
                     weight=ft.FontWeight.BOLD,
                     color=color,
@@ -344,6 +340,9 @@ def budgets_page(page: ft.Page):
             size=11,
             color=UX.MUTED,
         )
+
+        # Remaining is always against positive spent
+        remaining = max(b["amount"] - spent_positive, 0)
 
         return ft.Container(
             content=ft.Column(
@@ -424,7 +423,7 @@ def budgets_page(page: ft.Page):
                         [
                             meta,
                             ft.Text(
-                                f"Remaining: {max(b['amount'] - spent, 0):.2f}",
+                                f"Remaining: {remaining:.2f}",
                                 size=11,
                                 color=UX.MUTED,
                             ),
@@ -446,7 +445,6 @@ def budgets_page(page: ft.Page):
         selected_period = filter_period.value
         overshoot_shown = False
 
-        # Optional: sort budgets by end_date ascending
         budgets.sort(key=lambda x: (x["end_date"], x["category_id"]))
 
         for b in budgets:
@@ -456,23 +454,27 @@ def budgets_page(page: ft.Page):
                 and b["period"] != selected_period
             ):
                 continue
-            spent = get_category_spend(b["category_id"], b["start_date"], b["end_date"])
-            percent = spent / b["amount"] if b["amount"] > 0 else 0
+            raw_signed = get_category_spend(
+                b["category_id"], b["start_date"], b["end_date"]
+            )
+            # Convert signed sum to positive magnitude for budget comparison
+            spent_positive = abs(raw_signed)
+            percent = spent_positive / b["amount"] if b["amount"] > 0 else 0
             if percent >= 1 and not overshoot_shown:
                 show_overshoot_alert(
-                    category_map.get(b["category_id"], "Unknown"), spent, b["amount"]
+                    category_map.get(b["category_id"], "Unknown"),
+                    spent_positive,
+                    b["amount"],
                 )
                 overshoot_shown = True
-            card = build_budget_card(b, spent, percent)
+            card = build_budget_card(b, spent_positive, percent, raw_signed)
             budgets_container.controls.append(card)
 
         if not budgets_container.controls:
             budgets_container.controls.append(
                 ft.Container(
                     ft.Text(
-                        "No budgets match current filter.",
-                        color=UX.MUTED,
-                        size=14,
+                        "No budgets match current filter.", color=UX.MUTED, size=14
                     ),
                     padding=30,
                     alignment=ft.alignment.center,
@@ -514,19 +516,11 @@ def budgets_page(page: ft.Page):
                 s_val = start_field.value.strip()
                 e_val = end_field.value.strip()
             else:
-                # Already auto-filled
                 s_val = start_field.value
                 e_val = end_field.value
 
-            add_budget(
-                int(category_field.value),
-                per,
-                amount,
-                s_val,
-                e_val,
-            )
+            add_budget(int(category_field.value), per, amount, s_val, e_val)
             snack("Budget added", UX.SUCCESS)
-            # Reset minimal fields
             amount_field.value = ""
             form_feedback.value = ""
             refresh_budgets()
@@ -548,7 +542,6 @@ def budgets_page(page: ft.Page):
         height=44,
     )
 
-    # ------------- Layout: Add Form Card -------------
     add_form_card = ft.Container(
         ft.Column(
             [
@@ -593,12 +586,10 @@ def budgets_page(page: ft.Page):
         margin=ft.margin.only(top=30, bottom=12),
     )
 
-    # ------------- Initial Refresh -------------
-    # Ensure initial period logic
+    # Initial load
     update_form_visibility()
     refresh_budgets()
 
-    # ------------- Root Layout -------------
     root = ft.Container(
         content=ft.Column(
             [

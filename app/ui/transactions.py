@@ -1,6 +1,7 @@
 import csv
 import datetime
 import flet as ft
+
 from app.db.transactions import (
     add_transaction,
     get_recent_transactions,
@@ -13,6 +14,10 @@ from app.db.categories import (
     delete_category,
     get_category_id_by_name,
     update_category,
+)
+from app.db.recurring import (
+    create_recurring,
+    generate_due_transactions,
 )
 
 # ----------------- Icon Catalog -----------------
@@ -87,7 +92,6 @@ def transactions_page(page: ft.Page):
     def fetch_categories():
         return get_categories()
 
-    # Option lists
     def build_category_dropdown_options():
         return [ft.dropdown.Option(str(c["id"]), c["name"]) for c in fetch_categories()]
 
@@ -122,7 +126,6 @@ def transactions_page(page: ft.Page):
         options=[],
         border_radius=UX.R_MD,
     )
-
     category_field = ft.Dropdown(
         label="Category",
         width=220,
@@ -130,18 +133,15 @@ def transactions_page(page: ft.Page):
         border_radius=UX.R_MD,
     )
 
-    # Keep selected date as ISO
     selected_date_value = [datetime.date.today().isoformat()]
 
     # ---------- Date Picker ----------
     def on_date_change(e: ft.ControlEvent):
         try:
             d = e.data
-            # e.data may already be date iso str
             if isinstance(d, str):
                 selected_date_value[0] = d[:10]
             else:
-                # fallback
                 selected_date_value[0] = datetime.date.today().isoformat()
         except Exception:
             selected_date_value[0] = datetime.date.today().isoformat()
@@ -276,7 +276,7 @@ def transactions_page(page: ft.Page):
             add_category(name, add_category_icon.value)
             close_add_category()
             refresh_categories_main()
-            notify("Category added", UX.SUCCESS)
+            notify("Category added", UX.POSITIVE)
         except Exception as ex:
             add_feedback.value = f"Error: {ex}"
             page.update()
@@ -369,7 +369,7 @@ def transactions_page(page: ft.Page):
             close_edit_category()
             refresh_categories_main()
             refresh_category_list()
-            notify("Category updated", UX.SUCCESS)
+            notify("Category updated", UX.POSITIVE)
         except Exception as ex:
             edit_feedback.value = f"Error: {ex}"
             page.update()
@@ -420,6 +420,7 @@ def transactions_page(page: ft.Page):
 
     # Category list dialog
     categories_grid = ft.Column(spacing=10, scroll="auto")
+
     list_dialog.content = ft.Container(
         ft.Column(
             [
@@ -485,7 +486,6 @@ def transactions_page(page: ft.Page):
                 ft.Text("No categories yet.", color=UX.MUTED)
             )
         else:
-            # Create chip cards
             rows = []
             for cat in cats:
                 icon_name = cat.get("icon") or "Other"
@@ -538,74 +538,136 @@ def transactions_page(page: ft.Page):
         if category_field.page:
             category_field.update()
 
+    # ---------- Recurring Controls ----------
+    recurring_switch = ft.Switch(label="Recurring", value=False)
+    frequency_field = ft.Dropdown(
+        label="Frequency",
+        options=[
+            ft.dropdown.Option("daily"),
+            ft.dropdown.Option("weekly"),
+            ft.dropdown.Option("monthly"),
+            ft.dropdown.Option("yearly"),
+            ft.dropdown.Option("custom_interval"),
+        ],
+        width=160,
+        visible=False,
+    )
+    interval_field = ft.TextField(
+        label="Interval",
+        width=110,
+        visible=False,
+        tooltip="Only for custom_interval: number of days",
+    )
+    day_of_month_field = ft.TextField(
+        label="Day of Month",
+        width=130,
+        visible=False,
+        tooltip="Only for monthly: 1-31 (optional; blank = use start date day)",
+    )
+    end_date_field = ft.TextField(
+        label="End Date (YYYY-MM-DD)",
+        width=180,
+        visible=False,
+        tooltip="Optional final date",
+    )
+
+    def _toggle_recurring(e):
+        show = recurring_switch.value
+        frequency_field.visible = show
+        end_date_field.visible = show
+        interval_field.visible = show and (frequency_field.value == "custom_interval")
+        day_of_month_field.visible = show and (frequency_field.value == "monthly")
+        page.update()
+
+    def _freq_changed(e):
+        freq = frequency_field.value
+        interval_field.visible = freq == "custom_interval"
+        day_of_month_field.visible = freq == "monthly"
+        page.update()
+
+    recurring_switch.on_change = _toggle_recurring
+    frequency_field.on_change = _freq_changed
+
+    recurring_controls_row = ft.Row(
+        [
+            recurring_switch,
+            frequency_field,
+            interval_field,
+            day_of_month_field,
+            end_date_field,
+        ],
+        spacing=12,
+        wrap=True,
+    )
+
     # ---------- Transactions List ----------
     transaction_list = ft.Column(spacing=18)
 
-    def transaction_color_logic(category_name: str):
-        if category_name.lower() == "salary":
-            return UX.POSITIVE
-        elif category_name.lower() in ["food", "bills", "transport", "shopping"]:
-            return UX.NEGATIVE
-        return UX.ACCENT
+    def transaction_color(tx_amount: float):
+        return UX.POSITIVE if tx_amount > 0 else UX.NEGATIVE
 
     def build_transaction_card(tx):
         category_name = tx.category_name or "Other"
         icon_name = getattr(tx, "category_icon", "Other")
-        accent = transaction_color_logic(category_name)
+        color = transaction_color(tx.amount)
         date_str = str(tx.date)[:10]
+        # Display absolute amount but color-coded by sign
+        amount_text = f"{tx.currency} {abs(tx.amount):.2f}"
 
-        # Income or expense computation (for sign coloring)
-        is_income = category_name.lower() == "salary"
-        amount_text = f"{tx.currency} {tx.amount:.2f}"
-        amount_color = accent
+        badge = (
+            ft.Container(
+                ft.Row(
+                    [
+                        ft.Icon(ft.Icons.REPEAT, size=14, color=UX.ACCENT),
+                        ft.Text("Recurring", size=10, color=UX.ACCENT),
+                    ],
+                    spacing=4,
+                ),
+                padding=ft.padding.symmetric(horizontal=8, vertical=4),
+                bgcolor=ft.Colors.with_opacity(0.15, UX.ACCENT),
+                border_radius=UX.R_SM,
+                margin=ft.margin.only(bottom=4),
+            )
+            if tx.recurring_id
+            else None
+        )
 
-        card = ft.Container(
+        left_meta_col = [
+            ft.Text(category_name, size=15, weight=ft.FontWeight.W_600),
+            ft.Row(
+                [
+                    ft.Text(date_str, size=11, color=UX.MUTED),
+                    ft.Text(f"Acct: {tx.account_id}", size=11, color=UX.MUTED),
+                    ft.Text(tx.currency, size=11, color=UX.MUTED),
+                ],
+                spacing=10,
+            ),
+            ft.Text(
+                tx.notes or "",
+                size=11,
+                color=UX.MUTED,
+                italic=True,
+                max_lines=1,
+                overflow=ft.TextOverflow.ELLIPSIS,
+            ),
+        ]
+        if badge:
+            left_meta_col.insert(0, badge)
+
+        return ft.Container(
             ft.Row(
                 [
                     ft.Row(
                         [
                             ft.Container(
                                 ft.Icon(
-                                    get_icon_by_name(icon_name), color=accent, size=26
+                                    get_icon_by_name(icon_name), color=color, size=26
                                 ),
                                 padding=ft.padding.all(10),
-                                bgcolor=ft.Colors.with_opacity(0.25, accent),
+                                bgcolor=ft.Colors.with_opacity(0.25, color),
                                 border_radius=UX.R_MD,
                             ),
-                            ft.Column(
-                                [
-                                    ft.Text(
-                                        category_name,
-                                        size=15,
-                                        weight=ft.FontWeight.W_600,
-                                    ),
-                                    ft.Row(
-                                        [
-                                            ft.Text(date_str, size=11, color=UX.MUTED),
-                                            ft.Text(
-                                                f"Acct: {tx.account_id}",
-                                                size=11,
-                                                color=UX.MUTED,
-                                            ),
-                                            ft.Text(
-                                                tx.currency,
-                                                size=11,
-                                                color=UX.MUTED,
-                                            ),
-                                        ],
-                                        spacing=10,
-                                    ),
-                                    ft.Text(
-                                        tx.notes or "",
-                                        size=11,
-                                        color=UX.MUTED,
-                                        italic=True,
-                                        max_lines=1,
-                                        overflow=ft.TextOverflow.ELLIPSIS,
-                                    ),
-                                ],
-                                spacing=2,
-                            ),
+                            ft.Column(left_meta_col, spacing=3),
                         ],
                         spacing=14,
                     ),
@@ -615,7 +677,7 @@ def transactions_page(page: ft.Page):
                                 amount_text,
                                 size=16,
                                 weight=ft.FontWeight.W_700,
-                                color=amount_color,
+                                color=color,
                             ),
                             ft.IconButton(
                                 icon=ft.Icons.DELETE_ROUNDED,
@@ -641,9 +703,8 @@ def transactions_page(page: ft.Page):
             bgcolor=UX.SURFACE,
             border_radius=UX.R_LG,
             shadow=UX.SHADOW_CARD,
-            border=ft.border.only(left=ft.BorderSide(5, amount_color)),
+            border=ft.border.only(left=ft.BorderSide(5, color)),
         )
-        return card
 
     def refresh_transactions():
         txs = get_recent_transactions()
@@ -664,17 +725,27 @@ def transactions_page(page: ft.Page):
             transaction_list.update()
 
     # ---------- Add Transaction Logic ----------
+    INCOME_CATEGORIES = {"salary"}  # extend as needed
+
     def reset_form():
         amount_field.value = "0.00"
         notes_field.value = ""
         category_field.value = None
         account_field.value = None
         currency_field.value = None
+        recurring_switch.value = False
+        frequency_field.value = None
+        frequency_field.visible = False
+        interval_field.value = ""
+        interval_field.visible = False
+        day_of_month_field.value = ""
+        day_of_month_field.visible = False
+        end_date_field.value = ""
+        end_date_field.visible = False
         selected_date_value[0] = datetime.date.today().isoformat()
         selected_date_display.value = selected_date_value[0]
 
     def add_tx(e):
-        # Basic validation
         if not category_field.value:
             notify("Select a category", UX.WARN)
             return
@@ -685,33 +756,93 @@ def transactions_page(page: ft.Page):
             notify("Select currency", UX.WARN)
             return
         try:
-            amt = float(amount_field.value)
+            raw_amt = float(amount_field.value)
         except ValueError:
             notify("Invalid amount", UX.NEGATIVE)
             return
+
         date_iso = selected_date_value[0]
         category_id = int(category_field.value)
         account_id = int(account_field.value)
         currency = currency_field.value
+
+        cats_now = fetch_categories()
+        category_name = next(
+            (c["name"] for c in cats_now if c["id"] == category_id), "Other"
+        )
+        is_income = category_name.lower() in INCOME_CATEGORIES
+        signed_amount = raw_amt if is_income else -abs(raw_amt)
+
+        # Recurring branch
+        if recurring_switch.value:
+            freq = frequency_field.value
+            if not freq:
+                notify("Select frequency", UX.WARN)
+                return
+
+            interval = None
+            if freq == "custom_interval":
+                if not interval_field.value.strip():
+                    notify("Interval required for custom interval", UX.WARN)
+                    return
+                try:
+                    interval = int(interval_field.value)
+                    if interval <= 0:
+                        raise ValueError
+                except ValueError:
+                    notify("Interval must be a positive integer", UX.NEGATIVE)
+                    return
+
+            day_of_month = None
+            if freq == "monthly" and day_of_month_field.value.strip():
+                try:
+                    day_of_month = int(day_of_month_field.value)
+                    if day_of_month < 1 or day_of_month > 31:
+                        raise ValueError
+                except ValueError:
+                    notify("Day of month must be 1..31", UX.NEGATIVE)
+                    return
+
+            end_date = end_date_field.value.strip() or None
+
+            create_recurring(
+                account_id=account_id,
+                category_id=category_id,
+                amount=signed_amount,
+                currency=currency,
+                frequency=freq,
+                start_date=date_iso,
+                end_date=end_date,
+                notes=notes_field.value.strip(),
+                interval=interval,
+                day_of_month=day_of_month,
+            )
+
+            newly = generate_due_transactions()
+            refresh_transactions()
+            reset_form()
+            page.update()
+            notify(
+                f"Recurring pattern created (generated {newly} occurrence{'s' if newly != 1 else ''})",
+                UX.POSITIVE,
+            )
+            return
+
+        # Normal single transaction
         add_transaction(
             date_iso,
-            amt,
+            signed_amount,
             category_id,
             account_id,
             notes_field.value.strip(),
             currency,
         )
-        # Adjust account: Salary positive, others negative
-        cats_now = fetch_categories()
-        category_name = next(
-            (c["name"] for c in cats_now if c["id"] == category_id), "Other"
-        )
-        delta = amt if category_name.lower() == "salary" else -amt
-        increment_account_balance(account_id, currency, delta)
+        increment_account_balance(account_id, currency, signed_amount)
+
         refresh_transactions()
         reset_form()
         page.update()
-        notify("Transaction added", UX.SUCCESS)
+        notify("Transaction added", UX.POSITIVE)
 
     def delete_tx(txid: int):
         delete_transaction(txid)
@@ -757,7 +888,7 @@ def transactions_page(page: ft.Page):
                             tx.currency,
                         ]
                     )
-            notify(f"Exported {len(txs)} tx → {path}", UX.SUCCESS)
+            notify(f"Exported {len(txs)} tx → {path}", UX.POSITIVE)
         except Exception as ex:
             notify(f"Export error: {ex}", UX.NEGATIVE)
 
@@ -775,9 +906,10 @@ def transactions_page(page: ft.Page):
                         cat_id = get_category_id_by_name("Other")
                         skipped += 1
                     try:
+                        amt = float(row["amount"])
                         add_transaction(
                             row["date"],
-                            float(row["amount"]),
+                            amt,  # assuming CSV already uses signed logic or manual fix later
                             cat_id,
                             int(row["account"]),
                             row.get("notes", ""),
@@ -876,19 +1008,14 @@ def transactions_page(page: ft.Page):
                     height=20, color=ft.Colors.with_opacity(0.07, ft.Colors.BLACK)
                 ),
                 ft.Row(
-                    [
-                        date_btn,
-                        selected_date_display,
-                    ],
+                    [date_btn, selected_date_display],
                     spacing=14,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
                 stepper,
-                ft.Row(
-                    [category_field, account_field, currency_field],
-                    spacing=16,
-                ),
+                ft.Row([category_field, account_field, currency_field], spacing=16),
                 notes_field,
+                recurring_controls_row,
                 ft.Container(
                     add_tx_btn,
                     alignment=ft.alignment.center_left,
@@ -921,6 +1048,7 @@ def transactions_page(page: ft.Page):
     # Initial population
     refresh_transactions()
     refresh_category_list()
+    selected_date_display.value = selected_date_value[0]
 
     # ---------- Root Layout ----------
     root = ft.Container(
@@ -946,8 +1074,5 @@ def transactions_page(page: ft.Page):
         expand=True,
         bgcolor=UX.BG,
     )
-
-    # Initialize date display
-    selected_date_display.value = selected_date_value[0]
 
     return root

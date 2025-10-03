@@ -2,11 +2,40 @@ from .connection import get_db_connection
 from app.models import Transaction
 
 
-def add_transaction(date, amount, category_id, account_id, notes, currency):
+def add_transaction(
+    date,
+    amount,
+    category_id,
+    account_id,
+    notes,
+    currency,
+    recurring_id=None,
+    occurrence_date=None,
+):
+    """
+    Stores a transaction with SIGNED amount:
+      - Income categories: positive amount
+      - Expense categories: negative amount
+
+    Account balances are adjusted outside this function to keep it pure.
+    """
     conn = get_db_connection()
     conn.execute(
-        "INSERT INTO transactions (date, amount, category_id, account_id, notes, currency) VALUES (?, ?, ?, ?, ?, ?)",
-        (date, amount, category_id, account_id, notes, currency),
+        """
+        INSERT INTO transactions
+          (date, amount, category_id, account_id, notes, currency, recurring_id, occurrence_date)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            date,
+            amount,
+            category_id,
+            account_id,
+            notes,
+            currency,
+            recurring_id,
+            occurrence_date,
+        ),
     )
     conn.commit()
     conn.close()
@@ -14,38 +43,40 @@ def add_transaction(date, amount, category_id, account_id, notes, currency):
 
 def get_recent_transactions(limit=10):
     conn = get_db_connection()
-    transactions = conn.execute(
+    rows = conn.execute(
         """
-        SELECT t.*, c.name as category_name, c.icon as category_icon
+        SELECT t.*,
+               c.name AS category_name,
+               c.icon AS category_icon
         FROM transactions t
         LEFT JOIN categories c ON t.category_id = c.id
-        ORDER BY t.date DESC LIMIT ?
+        ORDER BY t.date DESC, t.id DESC
+        LIMIT ?
         """,
         (limit,),
     ).fetchall()
     conn.close()
-    return [Transaction.from_row(tx) for tx in transactions]
+    return [Transaction.from_row(r) for r in rows]
 
 
-def delete_transaction(transaction_id):
+def delete_transaction(transaction_id: int):
+    """
+    Deletes a transaction and reverses its balance impact.
+    Since amounts are signed, we just subtract the stored amount from balance
+    (equivalent to adding the negative).
+    """
     conn = get_db_connection()
     tx = conn.execute(
-        "SELECT amount, account_id, currency, category_id FROM transactions WHERE id = ?",
+        "SELECT amount, account_id, currency FROM transactions WHERE id = ?",
         (transaction_id,),
     ).fetchone()
     if tx:
-        amount = tx["amount"]
+        amount = tx["amount"]  # signed
         account_id = tx["account_id"]
         currency = tx["currency"]
-        category_id = tx["category_id"]
-        cat = conn.execute(
-            "SELECT name FROM categories WHERE id = ?", (category_id,)
-        ).fetchone()
-        category_name = cat["name"] if cat else ""
-        delta = -amount if category_name == "Salary" else amount
         conn.execute(
-            "UPDATE account_balances SET balance = balance + ? WHERE account_id = ? AND currency = ?",
-            (delta, account_id, currency),
+            "UPDATE account_balances SET balance = balance - ? WHERE account_id = ? AND currency = ?",
+            (amount, account_id, currency),
         )
     conn.execute("DELETE FROM transactions WHERE id = ?", (transaction_id,))
     conn.commit()
@@ -53,6 +84,9 @@ def delete_transaction(transaction_id):
 
 
 def get_category_spend(category_id, start_date, end_date):
+    """
+    Returns net sum (signed) for category; callers decide how to interpret.
+    """
     conn = get_db_connection()
     row = conn.execute(
         """
@@ -67,9 +101,17 @@ def get_category_spend(category_id, start_date, end_date):
 
 
 def get_transactions_for_analytics():
+    """
+    Returns raw dict rows including signed amounts for analytics.
+    """
     conn = get_db_connection()
     rows = conn.execute(
-        "SELECT id, date, amount, category_id, account_id, currency FROM transactions ORDER BY date"
+        """
+        SELECT id, date, amount, category_id, account_id, currency,
+               recurring_id, occurrence_date
+        FROM transactions
+        ORDER BY date ASC, id ASC
+        """
     ).fetchall()
     conn.close()
-    return [dict(row) for row in rows]
+    return [dict(r) for r in rows]
