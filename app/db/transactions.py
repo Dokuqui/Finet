@@ -64,3 +64,12 @@ def get_category_spend(category_id, start_date, end_date):
     ).fetchone()
     conn.close()
     return row["total"] if row and row["total"] else 0.0
+
+
+def get_transactions_for_analytics():
+    conn = get_db_connection()
+    rows = conn.execute(
+        "SELECT id, date, amount, category_id, account_id, currency FROM transactions ORDER BY date"
+    ).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]

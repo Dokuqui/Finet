@@ -15,7 +15,7 @@ from app.db.categories import (
     update_category,
 )
 
-# Expanded icon choices
+# ----------------- Icon Catalog -----------------
 ICON_CHOICES = [
     {"name": "Food", "icon": ft.Icons.LUNCH_DINING},
     {"name": "Transport", "icon": ft.Icons.DIRECTIONS_BUS},
@@ -32,87 +32,251 @@ ICON_CHOICES = [
 ]
 
 
-def get_icon_by_name(name):
+def get_icon_by_name(name: str):
     return next(
         (ic["icon"] for ic in ICON_CHOICES if ic["name"] == name), ft.Icons.CATEGORY
     )
 
 
+# ----------------- Design Tokens -----------------
+class UX:
+    BG = ft.Colors.GREY_50
+    SURFACE = ft.Colors.WHITE
+    SURFACE_ALT = ft.Colors.GREY_100
+    BORDER = ft.Colors.GREY_300
+    TEXT = ft.Colors.GREY_900
+    MUTED = ft.Colors.GREY_600
+    ACCENT = ft.Colors.BLUE_400
+    ACCENT_ALT = ft.Colors.BLUE_600
+    POSITIVE = ft.Colors.GREEN_400
+    NEGATIVE = ft.Colors.RED_400
+    WARN = ft.Colors.AMBER_400
+
+    R_SM = 8
+    R_MD = 14
+    R_LG = 20
+    R_XL = 26
+
+    SHADOW_SOFT = ft.BoxShadow(
+        spread_radius=1,
+        blur_radius=18,
+        color=ft.Colors.with_opacity(0.07, ft.Colors.BLACK),
+        offset=ft.Offset(0, 6),
+    )
+    SHADOW_CARD = ft.BoxShadow(
+        spread_radius=1,
+        blur_radius=12,
+        color=ft.Colors.with_opacity(0.06, ft.Colors.BLACK),
+        offset=ft.Offset(0, 4),
+    )
+
+
+# ----------------- Main Page -----------------
 def transactions_page(page: ft.Page):
+    page.bgcolor = UX.BG
+    page.padding = 0
+
+    # ---------- Snackbar helper ----------
+    def notify(msg: str, color=UX.ACCENT):
+        page.snack_bar = ft.SnackBar(ft.Text(msg), bgcolor=color)
+        page.snack_bar.open = True
+        if page:
+            page.update()
+
+    # ---------- Category Data ----------
+    def fetch_categories():
+        return get_categories()
+
+    # Option lists
+    def build_category_dropdown_options():
+        return [ft.dropdown.Option(str(c["id"]), c["name"]) for c in fetch_categories()]
+
+    # ---------- Fields & State ----------
+    selected_date_display = ft.Text("", size=12, color=UX.MUTED)
+    amount_field = ft.TextField(
+        label="Amount",
+        value="0.00",
+        keyboard_type="number",
+        width=180,
+        border_radius=UX.R_MD,
+    )
+    notes_field = ft.TextField(
+        label="Notes",
+        multiline=False,
+        width=420,
+        border_radius=UX.R_MD,
+    )
+
+    accounts = get_accounts()
+    account_field = ft.Dropdown(
+        label="Account",
+        width=260,
+        options=[
+            ft.dropdown.Option(str(a.id), f"{a.name} ({a.type})") for a in accounts
+        ],
+        border_radius=UX.R_MD,
+    )
+    currency_field = ft.Dropdown(
+        label="Currency",
+        width=130,
+        options=[],
+        border_radius=UX.R_MD,
+    )
+
+    category_field = ft.Dropdown(
+        label="Category",
+        width=220,
+        options=build_category_dropdown_options(),
+        border_radius=UX.R_MD,
+    )
+
+    # Keep selected date as ISO
+    selected_date_value = [datetime.date.today().isoformat()]
+
+    # ---------- Date Picker ----------
+    def on_date_change(e: ft.ControlEvent):
+        try:
+            d = e.data
+            # e.data may already be date iso str
+            if isinstance(d, str):
+                selected_date_value[0] = d[:10]
+            else:
+                # fallback
+                selected_date_value[0] = datetime.date.today().isoformat()
+        except Exception:
+            selected_date_value[0] = datetime.date.today().isoformat()
+        selected_date_display.value = selected_date_value[0]
+        page.update()
+
+    def on_date_dismiss(e):
+        notify("Date selection dismissed.", UX.MUTED)
+
+    date_picker = ft.DatePicker(
+        first_date=datetime.date(2024, 1, 1),
+        last_date=datetime.date(2036, 12, 31),
+        on_change=on_date_change,
+        on_dismiss=on_date_dismiss,
+    )
+    page.overlay.append(date_picker)
+
+    date_btn = ft.ElevatedButton(
+        "Choose Date",
+        icon=ft.Icons.CALENDAR_MONTH,
+        on_click=lambda e: page.open(date_picker),
+        bgcolor=UX.SURFACE_ALT,
+        color=UX.ACCENT,
+        style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=UX.R_MD)),
+        height=40,
+    )
+
+    # ---------- Amount Stepper ----------
+    def adjust_amount(delta: float):
+        try:
+            val = float(amount_field.value)
+        except ValueError:
+            val = 0.0
+        val = max(val + delta, 0)
+        amount_field.value = f"{val:.2f}"
+        page.update()
+
+    stepper = ft.Row(
+        [
+            ft.IconButton(
+                icon=ft.Icons.REMOVE,
+                tooltip="-1",
+                on_click=lambda e: adjust_amount(-1),
+                style=ft.ButtonStyle(
+                    bgcolor=UX.SURFACE_ALT,
+                    color=UX.ACCENT,
+                    shape=ft.RoundedRectangleBorder(radius=UX.R_SM),
+                ),
+                width=40,
+                height=40,
+            ),
+            amount_field,
+            ft.IconButton(
+                icon=ft.Icons.ADD,
+                tooltip="+1",
+                on_click=lambda e: adjust_amount(1),
+                style=ft.ButtonStyle(
+                    bgcolor=UX.SURFACE_ALT,
+                    color=UX.ACCENT,
+                    shape=ft.RoundedRectangleBorder(radius=UX.R_SM),
+                ),
+                width=40,
+                height=40,
+            ),
+        ],
+        spacing=10,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    )
+
+    # ---------- Account -> Currency dynamic ----------
+    def on_account_change(e):
+        val = account_field.value
+        if not val:
+            currency_field.options = []
+            currency_field.value = None
+            page.update()
+            return
+        acc = next((a for a in accounts if str(a.id) == val), None)
+        if acc:
+            currency_field.options = [
+                ft.dropdown.Option(b["currency"]) for b in acc.balances
+            ]
+            currency_field.value = acc.balances[0]["currency"] if acc.balances else None
+        else:
+            currency_field.options = []
+            currency_field.value = None
+        page.update()
+
+    account_field.on_change = on_account_change
+
+    # ---------- Category Management Dialogs ----------
     add_dialog = ft.AlertDialog(modal=True)
     edit_dialog = ft.AlertDialog(modal=True)
     list_dialog = ft.AlertDialog(modal=True)
 
-    add_name_field = ft.TextField(label="Category Name", width=200)
-    add_icon_dropdown = ft.Dropdown(
+    add_category_name = ft.TextField(label="Name", width=230)
+    add_category_icon = ft.Dropdown(
         label="Icon",
         options=[ft.dropdown.Option(ic["name"]) for ic in ICON_CHOICES],
         value="Other",
-        width=120,
+        width=170,
     )
-    add_icon_preview = ft.Icon(get_icon_by_name(add_icon_dropdown.value), size=32)
-    add_feedback = ft.Text("", color=ft.Colors.RED_400, size=13)
-
-    edit_name_field = ft.TextField(label="Category Name", width=200)
-    edit_icon_dropdown = ft.Dropdown(
-        label="Icon",
-        options=[ft.dropdown.Option(ic["name"]) for ic in ICON_CHOICES],
-        value="Other",
-        width=120,
-    )
-    edit_icon_preview = ft.Icon(get_icon_by_name(edit_icon_dropdown.value), size=32)
-    edit_feedback = ft.Text("", color=ft.Colors.RED_400, size=13)
-    editing_id = [None]
-
-    categories_list = ft.Column(spacing=10, scroll="auto")
-
-    category_field = ft.Dropdown(
-        label="",
-        options=[],
-        width=160,
-        border_radius=8,
-        border_color=ft.Colors.GREY_400,
-    )
-
-    file_picker = ft.FilePicker()
-    page.overlay.append(file_picker)
+    add_icon_preview = ft.Icon(get_icon_by_name("Other"), size=34)
+    add_feedback = ft.Text("", color=UX.NEGATIVE, size=12)
 
     def on_add_icon_change(e):
-        add_icon_preview.name = get_icon_by_name(add_icon_dropdown.value)
+        add_icon_preview.name = get_icon_by_name(add_category_icon.value)
         page.update()
 
-    add_icon_dropdown.on_change = on_add_icon_change
+    add_category_icon.on_change = on_add_icon_change
 
-    def on_edit_icon_change(e):
-        edit_icon_preview.name = get_icon_by_name(edit_icon_dropdown.value)
-        page.update()
-
-    edit_icon_dropdown.on_change = on_edit_icon_change
-
-    def open_add_dialog(e=None):
-        add_name_field.value = ""
-        add_icon_dropdown.value = "Other"
+    def open_add_category(e=None):
+        add_category_name.value = ""
+        add_category_icon.value = "Other"
         add_icon_preview.name = get_icon_by_name("Other")
         add_feedback.value = ""
         add_dialog.open = True
         page.dialog = add_dialog
         page.update()
 
-    def close_add_dialog(e=None):
+    def close_add_category(e=None):
         add_dialog.open = False
         page.update()
 
     def save_new_category(e):
-        name = add_name_field.value.strip()
-        icon = add_icon_dropdown.value
+        name = add_category_name.value.strip()
         if not name:
-            add_feedback.value = "Name can't be empty"
+            add_feedback.value = "Name is required."
             page.update()
             return
         try:
-            add_category(name, icon)
-            close_add_dialog()
-            refresh_categories()
+            add_category(name, add_category_icon.value)
+            close_add_category()
+            refresh_categories_main()
+            notify("Category added", UX.SUCCESS)
         except Exception as ex:
             add_feedback.value = f"Error: {ex}"
             page.update()
@@ -120,52 +284,92 @@ def transactions_page(page: ft.Page):
     add_dialog.content = ft.Container(
         ft.Column(
             [
-                ft.Text("Add Category", style="headlineSmall", size=18),
-                add_name_field,
-                ft.Row([add_icon_dropdown, add_icon_preview], spacing=10),
+                ft.Text("New Category", size=20, weight=ft.FontWeight.W_600),
+                ft.Row(
+                    [add_category_name, ft.Container(width=10), add_category_icon],
+                    spacing=0,
+                ),
                 ft.Row(
                     [
-                        ft.ElevatedButton("Save", on_click=save_new_category, width=90),
-                        ft.TextButton("Cancel", on_click=close_add_dialog, width=90),
-                        add_feedback,
+                        ft.Container(
+                            add_icon_preview,
+                            padding=ft.padding.all(10),
+                            bgcolor=UX.SURFACE_ALT,
+                            border_radius=UX.R_MD,
+                        ),
+                        ft.Container(expand=True),
+                    ]
+                ),
+                add_feedback,
+                ft.Row(
+                    [
+                        ft.TextButton("Cancel", on_click=close_add_category),
+                        ft.ElevatedButton(
+                            "Save",
+                            icon=ft.Icons.SAVE,
+                            bgcolor=UX.ACCENT,
+                            color=ft.Colors.WHITE,
+                            on_click=save_new_category,
+                        ),
                     ],
-                    spacing=10,
+                    alignment=ft.MainAxisAlignment.END,
                 ),
             ],
-            spacing=14,
+            spacing=16,
         ),
-        width=260,
-        padding=18,
-        bgcolor=ft.Colors.WHITE,
-        border_radius=14,
+        width=520,
+        padding=24,
+        bgcolor=UX.SURFACE,
+        border_radius=UX.R_LG,
+        shadow=UX.SHADOW_CARD,
     )
     page.overlay.append(add_dialog)
 
-    def open_edit_dialog(cat):
-        editing_id[0] = cat["id"]
-        edit_name_field.value = cat["name"]
-        edit_icon_dropdown.value = cat.get("icon") or "Other"
-        edit_icon_preview.name = get_icon_by_name(edit_icon_dropdown.value)
+    # Edit dialog
+    edit_category_id = [None]
+    edit_category_name = ft.TextField(label="Name", width=230)
+    edit_category_icon = ft.Dropdown(
+        label="Icon",
+        options=[ft.dropdown.Option(ic["name"]) for ic in ICON_CHOICES],
+        value="Other",
+        width=170,
+    )
+    edit_icon_preview = ft.Icon(get_icon_by_name("Other"), size=34)
+    edit_feedback = ft.Text("", color=UX.NEGATIVE, size=12)
+
+    def on_edit_icon_change(e):
+        edit_icon_preview.name = get_icon_by_name(edit_category_icon.value)
+        page.update()
+
+    edit_category_icon.on_change = on_edit_icon_change
+
+    def open_edit_category(cat):
+        edit_category_id[0] = cat["id"]
+        edit_category_name.value = cat["name"]
+        icon_val = cat.get("icon") or "Other"
+        edit_category_icon.value = icon_val
+        edit_icon_preview.name = get_icon_by_name(icon_val)
         edit_feedback.value = ""
         edit_dialog.open = True
         page.dialog = edit_dialog
         page.update()
 
-    def close_edit_dialog(e=None):
+    def close_edit_category(e=None):
         edit_dialog.open = False
         page.update()
 
     def save_edit_category(e):
-        name = edit_name_field.value.strip()
-        icon = edit_icon_dropdown.value
+        name = edit_category_name.value.strip()
         if not name:
-            edit_feedback.value = "Name can't be empty"
+            edit_feedback.value = "Name is required."
             page.update()
             return
         try:
-            update_category(editing_id[0], name, icon)
-            close_edit_dialog()
-            refresh_categories()
+            update_category(edit_category_id[0], name, edit_category_icon.value)
+            close_edit_category()
+            refresh_categories_main()
+            refresh_category_list()
+            notify("Category updated", UX.SUCCESS)
         except Exception as ex:
             edit_feedback.value = f"Error: {ex}"
             page.update()
@@ -173,31 +377,92 @@ def transactions_page(page: ft.Page):
     edit_dialog.content = ft.Container(
         ft.Column(
             [
-                ft.Text("Edit Category", style="headlineSmall", size=18),
-                edit_name_field,
-                ft.Row([edit_icon_dropdown, edit_icon_preview], spacing=10),
+                ft.Text("Edit Category", size=20, weight=ft.FontWeight.W_600),
+                ft.Row(
+                    [edit_category_name, ft.Container(width=10), edit_category_icon],
+                    spacing=0,
+                ),
                 ft.Row(
                     [
-                        ft.ElevatedButton(
-                            "Save", on_click=save_edit_category, width=90
+                        ft.Container(
+                            edit_icon_preview,
+                            padding=ft.padding.all(10),
+                            bgcolor=UX.SURFACE_ALT,
+                            border_radius=UX.R_MD,
                         ),
-                        ft.TextButton("Cancel", on_click=close_edit_dialog, width=90),
-                        edit_feedback,
+                        ft.Container(expand=True),
+                    ]
+                ),
+                edit_feedback,
+                ft.Row(
+                    [
+                        ft.TextButton("Cancel", on_click=close_edit_category),
+                        ft.ElevatedButton(
+                            "Save",
+                            icon=ft.Icons.SAVE,
+                            bgcolor=UX.ACCENT,
+                            color=ft.Colors.WHITE,
+                            on_click=save_edit_category,
+                        ),
                     ],
-                    spacing=10,
+                    alignment=ft.MainAxisAlignment.END,
+                ),
+            ],
+            spacing=16,
+        ),
+        width=520,
+        padding=24,
+        bgcolor=UX.SURFACE,
+        border_radius=UX.R_LG,
+        shadow=UX.SHADOW_CARD,
+    )
+    page.overlay.append(edit_dialog)
+
+    # Category list dialog
+    categories_grid = ft.Column(spacing=10, scroll="auto")
+    list_dialog.content = ft.Container(
+        ft.Column(
+            [
+                ft.Row(
+                    [
+                        ft.Text("Categories", size=20, weight=ft.FontWeight.W_600),
+                        ft.Container(expand=True),
+                        ft.IconButton(
+                            icon=ft.Icons.ADD,
+                            tooltip="Add",
+                            on_click=open_add_category,
+                            style=ft.ButtonStyle(
+                                bgcolor=UX.SURFACE_ALT,
+                                color=UX.ACCENT,
+                                shape=ft.RoundedRectangleBorder(radius=UX.R_SM),
+                            ),
+                        ),
+                    ],
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                ),
+                ft.Divider(height=10),
+                categories_grid,
+                ft.Container(height=4),
+                ft.Row(
+                    [
+                        ft.TextButton("Close", on_click=lambda e: close_list_dialog()),
+                    ],
+                    alignment=ft.MainAxisAlignment.END,
                 ),
             ],
             spacing=14,
         ),
-        width=260,
-        padding=18,
-        bgcolor=ft.Colors.WHITE,
-        border_radius=14,
+        width=560,
+        height=520,
+        padding=24,
+        bgcolor=UX.SURFACE,
+        border_radius=UX.R_LG,
+        shadow=UX.SHADOW_CARD,
     )
-    page.overlay.append(edit_dialog)
+    page.overlay.append(list_dialog)
 
     def open_list_dialog(e=None):
-        refresh_categories_list()
+        refresh_category_list()
         list_dialog.open = True
         page.dialog = list_dialog
         page.update()
@@ -206,390 +471,278 @@ def transactions_page(page: ft.Page):
         list_dialog.open = False
         page.update()
 
-    def refresh_categories_list():
-        cats = get_categories()
-        categories_list.controls.clear()
-        for cat in cats:
-            categories_list.controls.append(
-                ft.Row(
-                    [
-                        ft.Icon(
-                            get_icon_by_name(cat.get("icon", "Other")),
-                            color=ft.Colors.BLUE_400,
-                            size=20,
-                        ),
-                        ft.Text(cat["name"], style="bodyMedium", width=120),
-                        ft.IconButton(
-                            icon=ft.Icons.EDIT,
-                            tooltip="Edit",
-                            on_click=lambda e, cat=cat: open_edit_dialog(cat),
-                            style=ft.ButtonStyle(
-                                color=ft.Colors.BLUE_400,
-                                bgcolor=ft.Colors.GREY_50,
-                                shape=ft.RoundedRectangleBorder(radius=14),
-                            ),
-                            width=26,
-                            height=26,
-                        ),
-                        ft.IconButton(
-                            icon=ft.Icons.DELETE,
-                            tooltip="Delete",
-                            on_click=lambda e, cat_id=cat["id"]: on_delete_cat(cat_id),
-                            style=ft.ButtonStyle(
-                                color=ft.Colors.RED_400,
-                                bgcolor=ft.Colors.GREY_50,
-                                shape=ft.RoundedRectangleBorder(radius=14),
-                            ),
-                            width=26,
-                            height=26,
-                        ),
-                    ],
-                    spacing=4,
-                )
-            )
-        page.update()
-
-    list_dialog.content = ft.Container(
-        ft.Column(
-            [
-                ft.Text("Categories", style="headlineSmall", size=18),
-                categories_list,
-                ft.Row(
-                    [
-                        ft.TextButton("Close", on_click=close_list_dialog, width=90),
-                    ],
-                    alignment=ft.MainAxisAlignment.END,
-                ),
-            ],
-            spacing=14,
-        ),
-        width=320,
-        padding=18,
-        bgcolor=ft.Colors.WHITE,
-        border_radius=14,
-        height=320,
-    )
-    page.overlay.append(list_dialog)
-
-    def on_delete_cat(cat_id):
+    def delete_category_ui(cat_id):
         delete_category(cat_id)
-        refresh_categories()
-        refresh_categories_list()
+        refresh_categories_main()
+        refresh_category_list()
+        notify("Category deleted", UX.NEGATIVE)
 
-    def refresh_categories():
-        cats = get_categories()
-        category_field.options = [
-            ft.dropdown.Option(str(cat["id"]), cat["name"]) for cat in cats
-        ]
-        page.update()
+    def refresh_category_list():
+        categories_grid.controls.clear()
+        cats = fetch_categories()
+        if not cats:
+            categories_grid.controls.append(
+                ft.Text("No categories yet.", color=UX.MUTED)
+            )
+        else:
+            # Create chip cards
+            rows = []
+            for cat in cats:
+                icon_name = cat.get("icon") or "Other"
+                chip = ft.Container(
+                    ft.Row(
+                        [
+                            ft.Icon(
+                                get_icon_by_name(icon_name), size=20, color=UX.ACCENT
+                            ),
+                            ft.Text(cat["name"], size=13, weight=ft.FontWeight.W_500),
+                            ft.IconButton(
+                                icon=ft.Icons.EDIT,
+                                tooltip="Edit",
+                                on_click=lambda e, c=cat: open_edit_category(c),
+                                style=ft.ButtonStyle(
+                                    bgcolor=UX.SURFACE_ALT,
+                                    color=UX.ACCENT,
+                                    shape=ft.RoundedRectangleBorder(radius=UX.R_SM),
+                                ),
+                                icon_size=16,
+                            ),
+                            ft.IconButton(
+                                icon=ft.Icons.DELETE,
+                                tooltip="Delete",
+                                on_click=lambda e, cid=cat["id"]: delete_category_ui(
+                                    cid
+                                ),
+                                style=ft.ButtonStyle(
+                                    bgcolor=UX.SURFACE_ALT,
+                                    color=UX.NEGATIVE,
+                                    shape=ft.RoundedRectangleBorder(radius=UX.R_SM),
+                                ),
+                                icon_size=16,
+                            ),
+                        ],
+                        spacing=6,
+                        alignment=ft.MainAxisAlignment.START,
+                    ),
+                    padding=ft.padding.symmetric(horizontal=12, vertical=8),
+                    bgcolor=ft.Colors.with_opacity(0.5, ft.Colors.BLUE_50),
+                    border_radius=UX.R_LG,
+                )
+                rows.append(chip)
+            categories_grid.controls.extend(rows)
+        if categories_grid.page:
+            categories_grid.update()
 
-    selected_date = ft.Text("")
-    amount_field = ft.TextField(
-        label="Amount",
-        value="0.00",
-        keyboard_type="number",
-        width=120,
-        border_color=ft.Colors.GREY_400,
-        border_radius=8,
-    )
-    notes_field = ft.TextField(
-        label="Notes",
-        value="",
-        width=335,
-        border_color=ft.Colors.GREY_400,
-        border_radius=8,
-    )
-    transaction_list = ft.Column(spacing=20)
-    selected_date_value = ""
+    def refresh_categories_main():
+        category_field.options = build_category_dropdown_options()
+        if category_field.page:
+            category_field.update()
 
-    accounts = get_accounts()
-    account_field = ft.Dropdown(
-        label="Account",
-        width=210,
-        border_radius=8,
-        border_color=ft.Colors.GREY_400,
-        options=[
-            ft.dropdown.Option(str(acc.id), f"{acc.name} ({acc.type})")
-            for acc in accounts
-        ],
-    )
-    currency_field = ft.Dropdown(
-        label="Currency",
-        options=[],
-        width=85,
-        border_radius=8,
-        border_color=ft.Colors.GREY_400,
-    )
+    # ---------- Transactions List ----------
+    transaction_list = ft.Column(spacing=18)
 
-    def on_account_change(e):
-        acc_id = int(account_field.value) if account_field.value else None
-        acc = next((a for a in accounts if a.id == acc_id), None)
-        if acc:
-            currency_field.options = [
-                ft.dropdown.Option(b["currency"]) for b in acc.balances
-            ]
-            if acc.balances:
-                currency_field.value = acc.balances[0]["currency"]
-            else:
-                currency_field.value = None
-            page.update()
+    def transaction_color_logic(category_name: str):
+        if category_name.lower() == "salary":
+            return UX.POSITIVE
+        elif category_name.lower() in ["food", "bills", "transport", "shopping"]:
+            return UX.NEGATIVE
+        return UX.ACCENT
 
-    account_field.on_change = on_account_change
+    def build_transaction_card(tx):
+        category_name = tx.category_name or "Other"
+        icon_name = getattr(tx, "category_icon", "Other")
+        accent = transaction_color_logic(category_name)
+        date_str = str(tx.date)[:10]
 
-    # Date picker logic
-    def handle_change(e):
-        nonlocal selected_date_value
-        try:
-            selected_date_value = e.data.strftime("%Y-%m-%d")
-        except Exception:
-            selected_date_value = str(e.data)[:10]
-        selected_date.value = selected_date_value
-        page.update()
+        # Income or expense computation (for sign coloring)
+        is_income = category_name.lower() == "salary"
+        amount_text = f"{tx.currency} {tx.amount:.2f}"
+        amount_color = accent
 
-    def handle_dismissal(e):
-        page.snack_bar = ft.SnackBar(ft.Text("Date selection dismissed."))
-        page.update()
+        card = ft.Container(
+            ft.Row(
+                [
+                    ft.Row(
+                        [
+                            ft.Container(
+                                ft.Icon(
+                                    get_icon_by_name(icon_name), color=accent, size=26
+                                ),
+                                padding=ft.padding.all(10),
+                                bgcolor=ft.Colors.with_opacity(0.25, accent),
+                                border_radius=UX.R_MD,
+                            ),
+                            ft.Column(
+                                [
+                                    ft.Text(
+                                        category_name,
+                                        size=15,
+                                        weight=ft.FontWeight.W_600,
+                                    ),
+                                    ft.Row(
+                                        [
+                                            ft.Text(date_str, size=11, color=UX.MUTED),
+                                            ft.Text(
+                                                f"Acct: {tx.account_id}",
+                                                size=11,
+                                                color=UX.MUTED,
+                                            ),
+                                            ft.Text(
+                                                tx.currency,
+                                                size=11,
+                                                color=UX.MUTED,
+                                            ),
+                                        ],
+                                        spacing=10,
+                                    ),
+                                    ft.Text(
+                                        tx.notes or "",
+                                        size=11,
+                                        color=UX.MUTED,
+                                        italic=True,
+                                        max_lines=1,
+                                        overflow=ft.TextOverflow.ELLIPSIS,
+                                    ),
+                                ],
+                                spacing=2,
+                            ),
+                        ],
+                        spacing=14,
+                    ),
+                    ft.Column(
+                        [
+                            ft.Text(
+                                amount_text,
+                                size=16,
+                                weight=ft.FontWeight.W_700,
+                                color=amount_color,
+                            ),
+                            ft.IconButton(
+                                icon=ft.Icons.DELETE_ROUNDED,
+                                tooltip="Delete",
+                                on_click=lambda e, tid=tx.id: delete_tx(tid),
+                                style=ft.ButtonStyle(
+                                    bgcolor=UX.SURFACE_ALT,
+                                    color=UX.NEGATIVE,
+                                    shape=ft.RoundedRectangleBorder(radius=UX.R_SM),
+                                ),
+                                icon_size=20,
+                                width=40,
+                                height=40,
+                            ),
+                        ],
+                        spacing=4,
+                        alignment=ft.MainAxisAlignment.START,
+                    ),
+                ],
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            ),
+            padding=ft.padding.all(16),
+            bgcolor=UX.SURFACE,
+            border_radius=UX.R_LG,
+            shadow=UX.SHADOW_CARD,
+            border=ft.border.only(left=ft.BorderSide(5, amount_color)),
+        )
+        return card
 
-    date_picker = ft.DatePicker(
-        first_date=datetime.date(year=2025, month=1, day=1),
-        last_date=datetime.date(year=2035, month=12, day=1),
-        on_change=handle_change,
-        on_dismiss=handle_dismissal,
-    )
-    date_btn = ft.ElevatedButton(
-        "Pick date",
-        icon=ft.Icons.CALENDAR_MONTH,
-        on_click=lambda e: page.open(date_picker),
-        style=ft.ButtonStyle(
-            bgcolor=ft.Colors.GREY_100,
-            color=ft.Colors.BLUE_400,
-            shape=ft.RoundedRectangleBorder(radius=20),
-            padding=ft.Padding(10, 5, 10, 5),
-        ),
-        width=120,
-        height=36,
-    )
-    page.overlay.append(date_picker)
-
-    def change_amount(delta):
-        try:
-            amt = float(amount_field.value)
-        except ValueError:
-            amt = 0.00
-        amt += delta
-        amount_field.value = f"{max(amt, 0):.2f}"
-        page.update()
-
-    less_btn = ft.IconButton(
-        icon=ft.Icons.REMOVE,
-        on_click=lambda _: change_amount(-1),
-        style=ft.ButtonStyle(
-            bgcolor=ft.Colors.GREY_100,
-            color=ft.Colors.BLUE_400,
-            shape=ft.RoundedRectangleBorder(radius=20),
-        ),
-        width=36,
-        height=36,
-    )
-    more_btn = ft.IconButton(
-        icon=ft.Icons.ADD,
-        on_click=lambda _: change_amount(1),
-        style=ft.ButtonStyle(
-            bgcolor=ft.Colors.GREY_100,
-            color=ft.Colors.BLUE_400,
-            shape=ft.RoundedRectangleBorder(radius=20),
-        ),
-        width=36,
-        height=36,
-    )
-
-    def refresh_transactions(e=None):
+    def refresh_transactions():
         txs = get_recent_transactions()
         transaction_list.controls.clear()
-        transaction_list.controls.append(
-            ft.Text(
-                "Recent Transactions:",
-                style="titleMedium",
-                size=18,
-                weight=ft.FontWeight.BOLD,
-            )
-        )
         if not txs:
             transaction_list.controls.append(
                 ft.Container(
-                    ft.Text(
-                        "No transactions found. Add your first transaction above!",
-                        italic=True,
-                        color=ft.Colors.GREY_600,
-                    ),
-                    padding=18,
-                    bgcolor=ft.Colors.GREY_100,
-                    border_radius=10,
-                    alignment=ft.alignment.center,
-                    margin=ft.margin.only(top=8, bottom=8),
+                    ft.Text("No transactions yet.", color=UX.MUTED, size=13),
+                    padding=ft.padding.all(28),
+                    bgcolor=UX.SURFACE,
+                    border_radius=UX.R_LG,
                 )
             )
         else:
             for tx in txs:
-                date_str = str(tx.date)[:10]
-                category_name = tx.category_name or "Other"
-                icon_name = getattr(tx, "category_icon", "Other")
-                color = (
-                    ft.Colors.GREEN_400
-                    if category_name == "Salary"
-                    else ft.Colors.RED_400
-                    if category_name in ["Food", "Bills", "Transport"]
-                    else ft.Colors.BLUE_400
-                )
-                transaction_card = ft.Card(
-                    content=ft.Container(
-                        content=ft.Row(
-                            [
-                                ft.Column(
-                                    [
-                                        ft.Row(
-                                            [
-                                                ft.Icon(
-                                                    get_icon_by_name(icon_name),
-                                                    color=color,
-                                                ),
-                                                ft.Text(
-                                                    f"{category_name}",
-                                                    style="titleSmall",
-                                                    weight=ft.FontWeight.BOLD,
-                                                    color=ft.Colors.GREY_800,
-                                                ),
-                                                ft.Text(
-                                                    f"Account: {tx.account_id}",
-                                                    style="bodyMedium",
-                                                    color=ft.Colors.GREY_600,
-                                                ),
-                                                ft.Text(
-                                                    f"{tx.currency}",
-                                                    style="bodyMedium",
-                                                    color=ft.Colors.GREY_600,
-                                                ),
-                                            ],
-                                            spacing=12,
-                                        ),
-                                        ft.Text(
-                                            f"Date: {date_str}",
-                                            style="bodyMedium",
-                                            color=ft.Colors.GREY_700,
-                                        ),
-                                        ft.Text(
-                                            f"Amount: {tx.currency} {tx.amount:.2f}",
-                                            style="titleMedium",
-                                            color=color,
-                                            weight=ft.FontWeight.BOLD,
-                                        ),
-                                        ft.Text(
-                                            f"Notes: {tx.notes}",
-                                            style="bodyMedium",
-                                            color=ft.Colors.GREY_700,
-                                        ),
-                                    ],
-                                    spacing=8,
-                                ),
-                                ft.IconButton(
-                                    icon=ft.Icons.DELETE,
-                                    tooltip="Delete",
-                                    on_click=lambda e, txid=tx.id: on_delete_click(
-                                        txid
-                                    ),
-                                    style=ft.ButtonStyle(
-                                        color=ft.Colors.RED_400,
-                                        bgcolor=ft.Colors.GREY_100,
-                                        shape=ft.RoundedRectangleBorder(radius=18),
-                                    ),
-                                    width=38,
-                                    height=38,
-                                ),
-                            ],
-                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                        ),
-                        padding=14,
-                        bgcolor=ft.Colors.GREY_50,
-                        border_radius=12,
-                        shadow=ft.BoxShadow(
-                            spread_radius=2,
-                            blur_radius=7,
-                            color=ft.Colors.GREY_200,
-                            offset=ft.Offset(0, 2),
-                        ),
-                    ),
-                    elevation=0,
-                )
-                transaction_list.controls.append(transaction_card)
-        page.update()
+                transaction_list.controls.append(build_transaction_card(tx))
+        if transaction_list.page:
+            transaction_list.update()
 
-    def on_add_click(e):
-        date_val = selected_date.value or datetime.date.today().strftime("%Y-%m-%d")
-        try:
-            amt = float(amount_field.value)
-        except ValueError:
-            page.snack_bar = ft.SnackBar(ft.Text("Please enter a valid amount."))
-            page.update()
-            return
-
-        acc_id = int(account_field.value) if account_field.value else None
-        currency = currency_field.value
-        category_id = int(category_field.value) if category_field.value else None
-
-        add_transaction(
-            date_val,
-            amt,
-            category_id,
-            acc_id,
-            notes_field.value,
-            currency,
-        )
-
-        cats_now = get_categories()
-        category_name = next(
-            (cat["name"] for cat in cats_now if cat["id"] == category_id), "Other"
-        )
-        delta = amt if category_name == "Salary" else -amt
-        increment_account_balance(acc_id, currency, delta)
-
-        selected_date.value = ""
+    # ---------- Add Transaction Logic ----------
+    def reset_form():
         amount_field.value = "0.00"
+        notes_field.value = ""
         category_field.value = None
         account_field.value = None
         currency_field.value = None
-        notes_field.value = ""
-        page.snack_bar = ft.SnackBar(ft.Text("Transaction added!"))
-        refresh_transactions()
+        selected_date_value[0] = datetime.date.today().isoformat()
+        selected_date_display.value = selected_date_value[0]
 
-    def on_delete_click(txid):
+    def add_tx(e):
+        # Basic validation
+        if not category_field.value:
+            notify("Select a category", UX.WARN)
+            return
+        if not account_field.value:
+            notify("Select an account", UX.WARN)
+            return
+        if not currency_field.value:
+            notify("Select currency", UX.WARN)
+            return
+        try:
+            amt = float(amount_field.value)
+        except ValueError:
+            notify("Invalid amount", UX.NEGATIVE)
+            return
+        date_iso = selected_date_value[0]
+        category_id = int(category_field.value)
+        account_id = int(account_field.value)
+        currency = currency_field.value
+        add_transaction(
+            date_iso,
+            amt,
+            category_id,
+            account_id,
+            notes_field.value.strip(),
+            currency,
+        )
+        # Adjust account: Salary positive, others negative
+        cats_now = fetch_categories()
+        category_name = next(
+            (c["name"] for c in cats_now if c["id"] == category_id), "Other"
+        )
+        delta = amt if category_name.lower() == "salary" else -amt
+        increment_account_balance(account_id, currency, delta)
+        refresh_transactions()
+        reset_form()
+        page.update()
+        notify("Transaction added", UX.SUCCESS)
+
+    def delete_tx(txid: int):
         delete_transaction(txid)
-        page.snack_bar = ft.SnackBar(ft.Text("Transaction deleted!"))
         refresh_transactions()
+        notify("Transaction deleted", UX.NEGATIVE)
 
-    add_button = ft.ElevatedButton(
+    add_tx_btn = ft.ElevatedButton(
         "Add Transaction",
-        on_click=on_add_click,
+        icon=ft.Icons.ADD_CIRCLE,
+        bgcolor=UX.ACCENT,
+        color=ft.Colors.WHITE,
+        on_click=add_tx,
         style=ft.ButtonStyle(
-            bgcolor=ft.Colors.BLUE_400,
-            color=ft.Colors.WHITE,
-            shape=ft.RoundedRectangleBorder(radius=22),
-            padding=ft.Padding(16, 10, 16, 10),
-            elevation=2,
+            shape=ft.RoundedRectangleBorder(radius=UX.R_MD),
+            elevation=4,
         ),
-        width=210,
-        height=44,
+        height=46,
     )
 
-    def export_transactions_to_csv(path):
+    # ---------- Import / Export ----------
+    file_picker = ft.FilePicker()
+    page.overlay.append(file_picker)
+
+    def export_to_csv(path):
         if not path:
-            page.snack_bar = ft.SnackBar(ft.Text("Export cancelled or invalid path!"))
-            page.update()
-            print("Export cancelled or invalid path!")
+            notify("Export cancelled", UX.MUTED)
             return
         try:
             txs = get_recent_transactions(limit=10000)
-            with open(path, "w", newline="", encoding="utf-8") as csvfile:
-                writer = csv.writer(csvfile)
+            with open(path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
                 writer.writerow(
                     ["date", "amount", "category", "account", "notes", "currency"]
                 )
@@ -604,220 +757,197 @@ def transactions_page(page: ft.Page):
                             tx.currency,
                         ]
                     )
-            page.snack_bar = ft.SnackBar(ft.Text(f"Exported to {path}"))
-            page.update()
-            print(f"Exported {len(txs)} transactions to {path}")
+            notify(f"Exported {len(txs)} tx → {path}", UX.SUCCESS)
         except Exception as ex:
-            page.snack_bar = ft.SnackBar(ft.Text(f"Export error: {ex}"))
-            page.update()
-            print(f"Export error: {ex}")
+            notify(f"Export error: {ex}", UX.NEGATIVE)
 
-    def import_transactions_from_csv(path):
+    def import_from_csv(path):
         if not path:
-            page.snack_bar = ft.SnackBar(ft.Text("No file selected for import!"))
-            page.update()
-            print("No file selected for import!")
+            notify("No file selected", UX.MUTED)
             return
         try:
-            imported = 0
-            skipped = 0
-            with open(path, "r", encoding="utf-8") as csvfile:
-                reader = csv.DictReader(csvfile)
+            imported, skipped = 0, 0
+            with open(path, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
                 for row in reader:
-                    category_id = get_category_id_by_name(row["category"])
-                    if category_id is None:
-                        print(f"Category not found: {row['category']}, using 'Other'")
-                        category_id = get_category_id_by_name("Other")
+                    cat_id = get_category_id_by_name(row["category"])
+                    if cat_id is None:
+                        cat_id = get_category_id_by_name("Other")
                         skipped += 1
                     try:
                         add_transaction(
                             row["date"],
                             float(row["amount"]),
-                            category_id,
+                            cat_id,
                             int(row["account"]),
                             row.get("notes", ""),
                             row["currency"],
                         )
                         imported += 1
-                    except Exception as tx_ex:
-                        print(f"Import failed for row: {row} with error: {tx_ex}")
+                    except Exception:
                         skipped += 1
             refresh_transactions()
-            page.snack_bar = ft.SnackBar(
-                ft.Text(
-                    f"CSV Import finished! Imported: {imported}, Skipped: {skipped}"
-                )
-            )
-            page.update()
-            print(f"CSV Import finished! Imported: {imported}, Skipped: {skipped}")
+            notify(f"Import complete: {imported} ok, {skipped} skipped", UX.ACCENT)
         except Exception as ex:
-            page.snack_bar = ft.SnackBar(ft.Text(f"CSV Import error: {ex}"))
-            page.update()
-            print(f"CSV Import error: {ex}")
+            notify(f"Import error: {ex}", UX.NEGATIVE)
 
-    file_picker.on_save = lambda e: export_transactions_to_csv(e.path)
-    file_picker.on_result = lambda e: import_transactions_from_csv(
+    file_picker.on_save = lambda e: export_to_csv(e.path)
+    file_picker.on_result = lambda e: import_from_csv(
         e.files[0].path if e.files and e.files[0].path else None
     )
 
-    # --- UI layout ---
-    list_category_btn = ft.ElevatedButton(
-        "Show Categories",
-        icon=ft.Icons.LIST,
-        tooltip="Show Categories",
-        on_click=open_list_dialog,
-        style=ft.ButtonStyle(
-            color=ft.Colors.BLUE_400,
-            bgcolor=ft.Colors.GREY_50,
-            shape=ft.RoundedRectangleBorder(radius=14),
-        ),
-        width=145,
-        height=38,
-    )
-
-    add_category_btn = ft.ElevatedButton(
-        "Add Category",
-        icon=ft.Icons.ADD,
-        tooltip="Add Category",
-        on_click=open_add_dialog,
-        style=ft.ButtonStyle(
-            bgcolor=ft.Colors.BLUE_400,
-            color=ft.Colors.WHITE,
-            shape=ft.RoundedRectangleBorder(radius=14),
-        ),
-        width=145,
-        height=38,
-    )
-
-    import_btn = ft.ElevatedButton(
-        "Import CSV",
-        icon=ft.Icons.FILE_UPLOAD,
-        tooltip="Import Transactions from CSV",
-        on_click=lambda e: file_picker.pick_files(
-            allow_multiple=False, allowed_extensions=["csv"]
-        ),
-        style=ft.ButtonStyle(
-            bgcolor=ft.Colors.GREY_50,
-            color=ft.Colors.BLUE_400,
-            shape=ft.RoundedRectangleBorder(radius=14),
-        ),
-        width=145,
-        height=38,
-    )
-
-    export_btn = ft.ElevatedButton(
-        "Export CSV",
-        icon=ft.Icons.FILE_DOWNLOAD,
-        tooltip="Export Transactions to CSV",
-        on_click=lambda e: file_picker.save_file(
-            file_name="transactions.csv", allowed_extensions=["csv"]
-        ),
-        style=ft.ButtonStyle(
-            bgcolor=ft.Colors.GREY_50,
-            color=ft.Colors.BLUE_400,
-            shape=ft.RoundedRectangleBorder(radius=14),
-        ),
-        width=145,
-        height=38,
-    )
-
-    refresh_categories()
-    refresh_transactions()
-
-    category_panel = ft.Container(
+    # ---------- Utility Panel ----------
+    util_panel = ft.Container(
         ft.Column(
-            [add_category_btn, list_category_btn, import_btn, export_btn],
-            spacing=22,
+            [
+                ft.Text("Utilities", size=18, weight=ft.FontWeight.W_600),
+                ft.Divider(
+                    height=16, color=ft.Colors.with_opacity(0.08, ft.Colors.BLACK)
+                ),
+                ft.ElevatedButton(
+                    "Categories",
+                    icon=ft.Icons.LIST,
+                    on_click=open_list_dialog,
+                    bgcolor=UX.SURFACE_ALT,
+                    color=UX.ACCENT,
+                    style=ft.ButtonStyle(
+                        shape=ft.RoundedRectangleBorder(radius=UX.R_MD),
+                    ),
+                    height=40,
+                ),
+                ft.ElevatedButton(
+                    "Add Category",
+                    icon=ft.Icons.ADD,
+                    on_click=open_add_category,
+                    bgcolor=UX.ACCENT,
+                    color=ft.Colors.WHITE,
+                    style=ft.ButtonStyle(
+                        shape=ft.RoundedRectangleBorder(radius=UX.R_MD),
+                    ),
+                    height=40,
+                ),
+                ft.Divider(
+                    height=24, color=ft.Colors.with_opacity(0.05, ft.Colors.BLACK)
+                ),
+                ft.ElevatedButton(
+                    "Import CSV",
+                    icon=ft.Icons.FILE_UPLOAD,
+                    bgcolor=UX.SURFACE_ALT,
+                    color=UX.ACCENT,
+                    on_click=lambda e: file_picker.pick_files(
+                        allow_multiple=False, allowed_extensions=["csv"]
+                    ),
+                    style=ft.ButtonStyle(
+                        shape=ft.RoundedRectangleBorder(radius=UX.R_MD),
+                    ),
+                    height=40,
+                ),
+                ft.ElevatedButton(
+                    "Export CSV",
+                    icon=ft.Icons.FILE_DOWNLOAD,
+                    bgcolor=UX.SURFACE_ALT,
+                    color=UX.ACCENT,
+                    on_click=lambda e: file_picker.save_file(
+                        file_name="transactions.csv", allowed_extensions=["csv"]
+                    ),
+                    style=ft.ButtonStyle(
+                        shape=ft.RoundedRectangleBorder(radius=UX.R_MD),
+                    ),
+                    height=40,
+                ),
+            ],
+            spacing=16,
             alignment=ft.MainAxisAlignment.START,
         ),
-        bgcolor=ft.Colors.WHITE,
-        border_radius=18,
-        shadow=ft.BoxShadow(
-            spread_radius=2,
-            blur_radius=14,
-            color=ft.Colors.GREY_100,
-            offset=ft.Offset(0, 4),
-        ),
-        padding=ft.padding.only(top=32, left=22, right=22),
-        width=180,
-        margin=ft.margin.only(top=38, right=32, bottom=38),
-        alignment=ft.alignment.top_right,
+        width=200,
+        padding=ft.padding.all(22),
+        bgcolor=UX.SURFACE,
+        border_radius=UX.R_LG,
+        shadow=UX.SHADOW_SOFT,
+        margin=ft.margin.only(top=40, left=10, right=10, bottom=40),
     )
 
-    main_col = ft.Column(
-        [
-            ft.Container(
-                ft.Column(
+    # ---------- Add Transaction Card ----------
+    add_card = ft.Container(
+        ft.Column(
+            [
+                ft.Text("Add Transaction", size=24, weight=ft.FontWeight.W_600),
+                ft.Divider(
+                    height=20, color=ft.Colors.with_opacity(0.07, ft.Colors.BLACK)
+                ),
+                ft.Row(
                     [
-                        ft.Text(
-                            "Add Transaction",
-                            style="headlineSmall",
-                            size=28,
-                            weight=ft.FontWeight.BOLD,
-                            color=ft.Colors.GREY_900,
-                        ),
-                        ft.Row(
-                            [date_btn, selected_date],
-                            alignment=ft.MainAxisAlignment.CENTER,
-                            spacing=14,
-                        ),
-                        ft.Row(
-                            [amount_field, less_btn, more_btn],
-                            alignment=ft.MainAxisAlignment.CENTER,
-                            spacing=14,
-                        ),
-                        ft.Row(
-                            [category_field, account_field, currency_field],
-                            alignment=ft.MainAxisAlignment.CENTER,
-                            spacing=14,
-                        ),
-                        notes_field,
-                        ft.Container(
-                            add_button,
-                            alignment=ft.alignment.center,
-                            margin=ft.margin.only(top=30),
-                        ),
+                        date_btn,
+                        selected_date_display,
                     ],
-                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                    spacing=22,
+                    spacing=14,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
-                alignment=ft.alignment.center,
-                bgcolor=ft.Colors.WHITE,
-                border_radius=22,
-                shadow=ft.BoxShadow(
-                    spread_radius=3,
-                    blur_radius=18,
-                    color=ft.Colors.GREY_100,
-                    offset=ft.Offset(0, 8),
+                stepper,
+                ft.Row(
+                    [category_field, account_field, currency_field],
+                    spacing=16,
                 ),
-                padding=ft.padding.all(38),
-                margin=ft.margin.only(top=10, bottom=16),
-                width=720,
-            ),
-            ft.Divider(color=ft.Colors.GREY_100, height=2),
-            ft.Container(
-                transaction_list,
-                alignment=ft.alignment.center,
-                padding=ft.padding.only(top=32, bottom=28),
-                width=700,
-            ),
-        ],
-        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-        expand=True,
-        spacing=0,
-        scroll="auto",
+                notes_field,
+                ft.Container(
+                    add_tx_btn,
+                    alignment=ft.alignment.center_left,
+                    margin=ft.margin.only(top=12),
+                ),
+            ],
+            spacing=18,
+        ),
+        width=760,
+        padding=ft.padding.all(34),
+        bgcolor=UX.SURFACE,
+        border_radius=UX.R_XL,
+        shadow=UX.SHADOW_SOFT,
+        margin=ft.margin.only(top=38, bottom=12),
     )
 
-    return ft.Container(
+    # ---------- Transactions Section ----------
+    transactions_section = ft.Container(
+        ft.Column(
+            [
+                ft.Text("Recent Transactions", size=21, weight=ft.FontWeight.W_600),
+                transaction_list,
+            ],
+            spacing=20,
+        ),
+        width=760,
+        padding=ft.padding.only(bottom=40),
+    )
+
+    # Initial population
+    refresh_transactions()
+    refresh_category_list()
+
+    # ---------- Root Layout ----------
+    root = ft.Container(
         content=ft.Row(
             [
-                main_col,
-                category_panel,
+                ft.Container(
+                    ft.Column(
+                        [
+                            add_card,
+                            transactions_section,
+                        ],
+                        spacing=4,
+                        scroll="auto",
+                    ),
+                    expand=True,
+                    alignment=ft.alignment.top_center,
+                ),
+                util_panel,
             ],
             alignment=ft.MainAxisAlignment.CENTER,
             vertical_alignment=ft.CrossAxisAlignment.START,
         ),
         expand=True,
-        alignment=ft.alignment.top_center,
-        bgcolor=ft.Colors.GREY_50,
+        bgcolor=UX.BG,
     )
+
+    # Initialize date display
+    selected_date_display.value = selected_date_value[0]
+
+    return root
