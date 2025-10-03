@@ -1,108 +1,223 @@
+import datetime
 import flet as ft
 from app.db.categories import get_categories
-from app.db.budgets import (
-    get_budgets,
-    add_budget,
-    update_budget,
-    delete_budget,
-)
+from app.db.budgets import get_budgets, add_budget, update_budget, delete_budget
 from app.db.transactions import get_category_spend
-import datetime
+
+
+# Design Tokens / Theme Layer
+class UX:
+    BG = ft.Colors.GREY_50
+    SURFACE = ft.Colors.WHITE
+    SURFACE_ALT = ft.Colors.GREY_100
+    BORDER = ft.Colors.GREY_300
+    TEXT = ft.Colors.GREY_900
+    MUTED = ft.Colors.GREY_600
+    ACCENT = ft.Colors.BLUE_400
+    ACCENT_ALT = ft.Colors.BLUE_600
+    SUCCESS = ft.Colors.GREEN_400
+    WARNING = ft.Colors.AMBER_400
+    WARNING_ALT = ft.Colors.ORANGE_400
+    DANGER = ft.Colors.RED_400
+    SHADOW = ft.BoxShadow(
+        spread_radius=1,
+        blur_radius=18,
+        color=ft.Colors.with_opacity(0.08, ft.Colors.BLACK),
+        offset=ft.Offset(0, 6),
+    )
+    R_SM = 8
+    R_MD = 14
+    R_LG = 20
+    R_XL = 26
 
 
 def budgets_page(page: ft.Page):
-    categories = get_categories()
-    category_dict = {cat["id"]: cat["name"] for cat in categories}
+    page.bgcolor = UX.BG
+    page.padding = 0
 
-    # Input fields
+    # ------------- Data & Lookup -------------
+    categories = get_categories()
+    category_map = {c["id"]: c["name"] for c in categories}
+
+    # ------------- Helpers -------------
+    def today():
+        return datetime.date.today()
+
+    def month_range(ref: datetime.date):
+        start = ref.replace(day=1)
+        nxt = (start + datetime.timedelta(days=32)).replace(day=1)
+        end = nxt - datetime.timedelta(days=1)
+        return start, end
+
+    def week_range(ref: datetime.date):
+        start = ref - datetime.timedelta(days=ref.weekday())
+        end = start + datetime.timedelta(days=6)
+        return start, end
+
+    def fmt(d: datetime.date | str):
+        if isinstance(d, datetime.date):
+            return d.isoformat()
+        return d
+
+    def parse_float(val: str, default=0.0):
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return default
+
+    def snack(msg: str, color=UX.ACCENT):
+        page.snack_bar = ft.SnackBar(ft.Text(msg), bgcolor=color)
+        page.snack_bar.open = True
+        if page:
+            page.update()
+
+    # ------------- Add Form State -------------
+    period_choices = [
+        ("monthly", "Monthly"),
+        ("weekly", "Weekly"),
+        ("custom", "Custom"),
+    ]
+
     category_field = ft.Dropdown(
         label="Category",
-        options=[ft.dropdown.Option(str(cat["id"]), cat["name"]) for cat in categories],
-        width=200,
+        options=[ft.dropdown.Option(str(c["id"]), c["name"]) for c in categories],
+        width=210,
     )
     period_field = ft.Dropdown(
         label="Period",
-        options=[
-            ft.dropdown.Option("monthly", "Monthly"),
-            ft.dropdown.Option("weekly", "Weekly"),
-            ft.dropdown.Option("custom", "Custom"),
-        ],
-        width=120,
+        options=[ft.dropdown.Option(v, lbl) for v, lbl in period_choices],
+        width=150,
     )
     amount_field = ft.TextField(
-        label="Budget Amount", keyboard_type="number", width=120
+        label="Budget Amount",
+        keyboard_type="number",
+        width=150,
+        tooltip="Numeric amount (e.g. 250.00)",
     )
-    start_date_field = ft.TextField(label="Start Date (YYYY-MM-DD)", width=120)
-    end_date_field = ft.TextField(label="End Date (YYYY-MM-DD)", width=120)
-    feedback_text = ft.Text("", color=ft.Colors.RED_400)
+    start_field = ft.TextField(label="Start (YYYY-MM-DD)", width=150, visible=False)
+    end_field = ft.TextField(label="End (YYYY-MM-DD)", width=150, visible=False)
+    form_feedback = ft.Text("", color=UX.DANGER, size=12)
 
-    # Edit Dialog
-    edit_dialog = ft.AlertDialog(modal=True)
-    edit_category_field = ft.Dropdown(
-        label="Category",
-        options=[ft.dropdown.Option(str(cat["id"]), cat["name"]) for cat in categories],
-        width=200,
-    )
-    edit_period_field = ft.Dropdown(
-        label="Period",
-        options=[
-            ft.dropdown.Option("monthly", "Monthly"),
-            ft.dropdown.Option("weekly", "Weekly"),
-            ft.dropdown.Option("custom", "Custom"),
+    # Quick fill buttons
+    def set_this_month(e):
+        s, e_ = month_range(today())
+        start_field.value = fmt(s)
+        end_field.value = fmt(e_)
+        start_field.visible = True
+        end_field.visible = True
+        period_field.value = "custom"
+        update_form_visibility()
+
+    def set_this_week(e):
+        s, e_ = week_range(today())
+        start_field.value = fmt(s)
+        end_field.value = fmt(e_)
+        start_field.visible = True
+        end_field.visible = True
+        period_field.value = "custom"
+        update_form_visibility()
+
+    quick_row = ft.Row(
+        [
+            ft.TextButton(
+                "This Month", icon=ft.Icons.CALENDAR_MONTH, on_click=set_this_month
+            ),
+            ft.TextButton(
+                "This Week", icon=ft.Icons.DATE_RANGE, on_click=set_this_week
+            ),
         ],
-        width=120,
+        spacing=4,
     )
-    edit_amount_field = ft.TextField(
-        label="Budget Amount", keyboard_type="number", width=120
-    )
-    edit_start_date_field = ft.TextField(label="Start Date (YYYY-MM-DD)", width=120)
-    edit_end_date_field = ft.TextField(label="End Date (YYYY-MM-DD)", width=120)
-    edit_feedback = ft.Text("", color=ft.Colors.RED_400)
-    editing_budget_id = [None]
 
-    def open_edit_dialog(budget):
-        editing_budget_id[0] = budget["id"]
-        edit_category_field.value = str(budget["category_id"])
-        edit_period_field.value = budget["period"]
-        edit_amount_field.value = str(budget["amount"])
-        edit_start_date_field.value = budget["start_date"]
-        edit_end_date_field.value = budget["end_date"]
-        edit_feedback.value = ""
-        edit_dialog.open = True
-        page.dialog = edit_dialog
+    def update_form_visibility():
+        p = period_field.value
+        if p == "custom":
+            # Show fields as editable
+            start_field.visible = True
+            end_field.visible = True
+            start_field.disabled = False
+            end_field.disabled = False
+        else:
+            # Auto-generate dates and hide manual edit (still display as read-only summary)
+            if p == "monthly":
+                s, e_ = month_range(today())
+            elif p == "weekly":
+                s, e_ = week_range(today())
+            else:
+                s, e_ = today(), today()
+            start_field.value = fmt(s)
+            end_field.value = fmt(e_)
+            start_field.visible = True
+            end_field.visible = True
+            start_field.disabled = True
+            end_field.disabled = True
         page.update()
 
-    def close_edit_dialog(e=None):
+    period_field.on_change = lambda e: update_form_visibility()
+
+    # ------------- Edit Dialog -------------
+    edit_dialog = ft.AlertDialog(modal=True)
+    edit_budget_id = [None]
+    edit_category = ft.Dropdown(
+        label="Category",
+        options=[ft.dropdown.Option(str(c["id"]), c["name"]) for c in categories],
+        width=210,
+    )
+    edit_period = ft.Dropdown(
+        label="Period",
+        options=[ft.dropdown.Option(v, lbl) for v, lbl in period_choices],
+        width=150,
+    )
+    edit_amount = ft.TextField(label="Amount", keyboard_type="number", width=150)
+    edit_start = ft.TextField(label="Start (YYYY-MM-DD)", width=150)
+    edit_end = ft.TextField(label="End (YYYY-MM-DD)", width=150)
+    edit_feedback = ft.Text("", color=UX.DANGER, size=12)
+
+    def open_edit(budget: dict):
+        edit_budget_id[0] = budget["id"]
+        edit_category.value = str(budget["category_id"])
+        edit_period.value = budget["period"]
+        edit_amount.value = f"{budget['amount']:.2f}"
+        edit_start.value = budget["start_date"]
+        edit_end.value = budget["end_date"]
+        edit_feedback.value = ""
+        page.dialog = edit_dialog
+        edit_dialog.open = True
+        page.update()
+
+    def close_edit(e=None):
         edit_dialog.open = False
         page.update()
 
-    def save_edit_budget(e):
+    def save_edit(e):
         try:
-            cat_id = int(edit_category_field.value)
-            period = edit_period_field.value
-            amount = float(edit_amount_field.value)
-            start_date = edit_start_date_field.value.strip()
-            end_date = edit_end_date_field.value.strip()
-            today = datetime.date.today()
-            if period == "monthly" and (not start_date or not end_date):
-                start_date = today.replace(day=1)
-                end_date = (start_date + datetime.timedelta(days=32)).replace(
-                    day=1
-                ) - datetime.timedelta(days=1)
-            elif period == "weekly" and (not start_date or not end_date):
-                start_date = today - datetime.timedelta(days=today.weekday())
-                end_date = start_date + datetime.timedelta(days=6)
+            cat_id = int(edit_category.value)
+            per = edit_period.value
+            amt = parse_float(edit_amount.value, 0.0)
+            s_val = edit_start.value.strip()
+            e_val = edit_end.value.strip()
+            if per in ("monthly", "weekly") and (not s_val or not e_val):
+                # Regenerate if missing (fallback)
+                if per == "monthly":
+                    s, ee = month_range(today())
+                else:
+                    s, ee = week_range(today())
+                s_val, e_val = fmt(s), fmt(ee)
+            if amt <= 0:
+                edit_feedback.value = "Amount must be > 0"
+                page.update()
+                return
             update_budget(
-                editing_budget_id[0],
+                edit_budget_id[0],
                 category_id=cat_id,
-                period=period,
-                amount=amount,
-                start_date=str(start_date),
-                end_date=str(end_date),
+                period=per,
+                amount=amt,
+                start_date=s_val,
+                end_date=e_val,
             )
-            edit_feedback.value = "Budget updated!"
-            close_edit_dialog()
+            close_edit()
             refresh_budgets()
+            snack("Budget updated", UX.SUCCESS)
         except Exception as ex:
             edit_feedback.value = f"Error: {ex}"
             page.update()
@@ -110,298 +225,414 @@ def budgets_page(page: ft.Page):
     edit_dialog.content = ft.Container(
         ft.Column(
             [
-                ft.Text("Edit Budget", style="headlineSmall", size=18),
-                edit_category_field,
-                edit_period_field,
-                edit_amount_field,
-                edit_start_date_field,
-                edit_end_date_field,
+                ft.Text("Edit Budget", size=20, weight=ft.FontWeight.BOLD),
+                ft.Row([edit_category, edit_period, edit_amount], spacing=14),
+                ft.Row([edit_start, edit_end], spacing=14),
+                edit_feedback,
                 ft.Row(
                     [
-                        ft.ElevatedButton("Save", on_click=save_edit_budget, width=90),
-                        ft.TextButton("Cancel", on_click=close_edit_dialog, width=90),
-                        edit_feedback,
+                        ft.ElevatedButton(
+                            "Save",
+                            icon=ft.Icons.SAVE,
+                            bgcolor=UX.ACCENT,
+                            color=ft.Colors.WHITE,
+                            on_click=save_edit,
+                        ),
+                        ft.TextButton("Cancel", on_click=close_edit),
                     ],
-                    spacing=10,
+                    alignment=ft.MainAxisAlignment.END,
                 ),
             ],
-            spacing=12,
+            spacing=16,
         ),
-        width=340,
-        padding=18,
-        bgcolor=ft.Colors.WHITE,
-        border_radius=14,
+        width=680,
+        padding=24,
+        bgcolor=UX.SURFACE,
+        border_radius=UX.R_LG,
     )
     page.overlay.append(edit_dialog)
 
-    def on_add_budget(e):
-        try:
-            cat_id = int(category_field.value)
-            period = period_field.value
-            amount = float(amount_field.value)
-            start_date = start_date_field.value.strip()
-            end_date = end_date_field.value.strip()
-            today = datetime.date.today()
-            if period == "monthly" and (not start_date or not end_date):
-                start_date = today.replace(day=1)
-                end_date = (start_date + datetime.timedelta(days=32)).replace(
-                    day=1
-                ) - datetime.timedelta(days=1)
-            elif period == "weekly" and (not start_date or not end_date):
-                start_date = today - datetime.timedelta(days=today.weekday())
-                end_date = start_date + datetime.timedelta(days=6)
-            elif period == "custom":
-                if not start_date or not end_date:
-                    feedback_text.value = (
-                        "Please provide both start and end dates for custom period."
-                    )
-                    page.update()
-                    return
-            add_budget(cat_id, period, amount, str(start_date), str(end_date))
-            feedback_text.value = "Budget added!"
-            refresh_budgets()
-        except Exception as ex:
-            feedback_text.value = f"Error: {ex}"
-        page.update()
-
-    add_btn = ft.ElevatedButton(
-        "Add Budget",
-        icon=ft.Icons.ADD,
-        style=ft.ButtonStyle(
-            bgcolor=ft.Colors.BLUE_400,
-            color=ft.Colors.WHITE,
-            shape=ft.RoundedRectangleBorder(radius=14),
-            elevation=2,
-        ),
-        width=120,
-        height=36,
-        on_click=on_add_budget,
+    # ------------- Budget List + Filtering -------------
+    budgets_container = ft.Column(spacing=18, width=1000)
+    filter_period = ft.Dropdown(
+        label="Filter Period",
+        width=170,
+        options=[ft.dropdown.Option("all", "All")]
+        + [ft.dropdown.Option(v, lbl) for v, lbl in period_choices],
+        value="all",
     )
 
-    def delete_budget_ui(budget_id):
-        delete_budget(budget_id)
-        feedback_text.value = "Budget deleted!"
-        refresh_budgets()
-        page.update()
+    def badge(percent: float):
+        # Tiers: <0.7 good, <0.85 okay, <1 near, >=1 exceeded
+        if percent >= 1:
+            txt, col, bg = "Exceeded", UX.DANGER, ft.Colors.RED_50
+        elif percent >= 0.85:
+            txt, col, bg = "Critical", UX.WARNING_ALT, ft.Colors.ORANGE_50
+        elif percent >= 0.7:
+            txt, col, bg = "Warning", UX.WARNING, ft.Colors.AMBER_50
+        else:
+            txt, col, bg = "On Track", UX.SUCCESS, ft.Colors.GREEN_50
+        return ft.Container(
+            ft.Text(txt, size=11, weight=ft.FontWeight.BOLD, color=col),
+            padding=ft.padding.symmetric(horizontal=10, vertical=4),
+            border_radius=UX.R_SM,
+            bgcolor=bg,
+        )
 
-    # --- Notification Popups ---
-    def show_budget_alert(category_name, spent, budget):
+    def progress_color(percent: float):
+        if percent >= 1:
+            return UX.DANGER
+        elif percent >= 0.85:
+            return UX.WARNING_ALT
+        elif percent >= 0.7:
+            return UX.WARNING
+        return UX.SUCCESS
+
+    # single alert per refresh
+    def show_overshoot_alert(cat_name, spent, amount):
         dialog = ft.AlertDialog(
-            title=ft.Text("Budget Limit Exceeded!"),
-            content=ft.Text(
-                f"You have exceeded your budget for {category_name}.\n"
-                f"Spent: {spent:.2f} / Budget: {budget:.2f}"
-            ),
-            actions=[ft.TextButton("OK", on_click=lambda e: close_budget_alert())],
+            title=ft.Text("Budget Limit Exceeded"),
+            content=ft.Text(f"{cat_name}\nSpent {spent:.2f} of {amount:.2f}"),
+            actions=[ft.TextButton("OK", on_click=lambda e: close_alert())],
             modal=True,
             open=True,
         )
         page.dialog = dialog
         page.update()
 
-    def close_budget_alert():
-        page.dialog.open = False
-        page.update()
+    def close_alert():
+        if page.dialog:
+            page.dialog.open = False
+            page.update()
 
-    budgets_list = ft.Column()
+    def delete_budget_ui(budget_id):
+        delete_budget(budget_id)
+        refresh_budgets()
+        snack("Budget deleted", UX.DANGER)
 
-    def budget_status_badge(percent):
-        if percent >= 1.0:
-            return ft.Container(
+    def build_budget_card(b: dict, spent: float, percent: float):
+        color = progress_color(percent)
+        pct_text = int(min(percent, 1) * 100)
+        name = category_map.get(b["category_id"], "Unknown")
+        per_label = b["period"].capitalize()
+        badge_ctrl = badge(percent)
+
+        # Progress overlay
+        prog_stack = ft.Stack(
+            [
+                ft.ProgressBar(
+                    value=min(percent, 1.0),
+                    bgcolor=ft.Colors.GREY_200,
+                    color=color,
+                    width=430,
+                    height=20,
+                    border_radius=UX.R_SM,
+                ),
                 ft.Text(
-                    "Exceeded",
-                    color=ft.Colors.RED_400,
-                    size=13,
+                    f"{pct_text}%  {spent:.2f}/{b['amount']:.2f}",
+                    size=12,
                     weight=ft.FontWeight.BOLD,
-                ),
-                bgcolor=ft.Colors.RED_50,
-                border_radius=8,
-                padding=ft.padding.symmetric(horizontal=10, vertical=5),
-            )
-        elif percent >= 0.9:
-            return ft.Container(
-                ft.Text(
-                    "Nearing",
-                    color=ft.Colors.ORANGE_400,
-                    size=13,
-                    weight=ft.FontWeight.BOLD,
-                ),
-                bgcolor=ft.Colors.ORANGE_50,
-                border_radius=8,
-                padding=ft.padding.symmetric(horizontal=10, vertical=5),
-            )
-        else:
-            return ft.Container(
-                ft.Text(
-                    "On Track",
-                    color=ft.Colors.GREEN_400,
-                    size=13,
-                    weight=ft.FontWeight.BOLD,
-                ),
-                bgcolor=ft.Colors.GREEN_50,
-                border_radius=8,
-                padding=ft.padding.symmetric(horizontal=10, vertical=5),
-            )
-
-    def refresh_budgets():
-        budgets_list.controls.clear()
-        budgets = get_budgets()
-        # Track if any exceeded popups shown this refresh
-        popup_shown = False
-        for b in budgets:
-            spent = get_category_spend(b["category_id"], b["start_date"], b["end_date"])
-            percent = min(spent / b["amount"], 1.0) if b["amount"] > 0 else 0
-            color = ft.Colors.GREEN_400
-            status_badge = budget_status_badge(percent)
-            # Only show one exceeded popup per refresh
-            if percent >= 1.0 and not popup_shown:
-                color = ft.Colors.RED_400
-                show_budget_alert(
-                    category_dict.get(b["category_id"], "Unknown"), spent, b["amount"]
-                )
-                popup_shown = True
-            elif percent >= 0.9 and not popup_shown:
-                color = ft.Colors.ORANGE_400
-                # Optional: show nearing alert as snack bar
-                page.snack_bar = ft.SnackBar(
-                    ft.Text(
-                        f"Nearing budget limit for {category_dict.get(b['category_id'], 'Unknown')}.",
-                        color=color,
-                    )
-                )
-                page.update()
-                popup_shown = True
-
-            controls = [
-                ft.Row(
-                    [
-                        ft.Icon(ft.Icons.PIE_CHART, color=color, size=22),
-                        ft.Text(
-                            f"{category_dict.get(b['category_id'], 'Unknown')} ({b['period'].capitalize()})",
-                            style="headlineSmall",
-                            weight=ft.FontWeight.BOLD,
-                            color=ft.Colors.GREY_900,
-                        ),
-                        status_badge,
-                        ft.Row(
-                            [
-                                ft.IconButton(
-                                    icon=ft.Icons.EDIT,
-                                    tooltip="Edit",
-                                    on_click=lambda e, b=b: open_edit_dialog(b),
-                                    style=ft.ButtonStyle(
-                                        bgcolor=ft.Colors.GREY_50,
-                                        color=ft.Colors.BLUE_400,
-                                        shape=ft.RoundedRectangleBorder(radius=14),
-                                    ),
-                                    width=28,
-                                    height=28,
-                                ),
-                                ft.IconButton(
-                                    icon=ft.Icons.DELETE,
-                                    tooltip="Delete",
-                                    on_click=lambda e, b_id=b["id"]: delete_budget_ui(
-                                        b_id
-                                    ),
-                                    style=ft.ButtonStyle(
-                                        bgcolor=ft.Colors.GREY_50,
-                                        color=ft.Colors.RED_400,
-                                        shape=ft.RoundedRectangleBorder(radius=14),
-                                    ),
-                                    width=28,
-                                    height=28,
-                                ),
-                            ],
-                            spacing=6,
-                        ),
-                    ],
-                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                ),
-                ft.Text(
-                    f"Budget: {b['amount']:.2f} | Spent: {spent:.2f} | Period: {b['start_date']} to {b['end_date']}",
-                    style="bodyMedium",
-                    color=ft.Colors.GREY_700,
-                ),
-                ft.Container(
-                    ft.Stack(
-                        [
-                            ft.ProgressBar(
-                                value=percent,
-                                color=color,
-                                bgcolor=ft.Colors.GREY_200,
-                                width=350,
-                                height=18,
-                                border_radius=9,
-                            ),
-                            ft.Text(
-                                f"{int(percent * 100)}% ({spent:.2f}/{b['amount']:.2f})",
-                                color=color,
-                                size=12,
-                                weight=ft.FontWeight.BOLD,
-                                left=10,
-                                top=2,
-                            ),
-                        ]
-                    ),
-                    margin=ft.margin.only(top=10, bottom=2),
+                    color=color,
+                    top=2,
+                    left=10,
                 ),
             ]
-            budgets_list.controls.append(
-                ft.Card(
-                    content=ft.Container(
-                        ft.Column(controls, spacing=10),
-                        bgcolor=ft.Colors.WHITE,
-                        border_radius=18,
-                        padding=ft.padding.all(24),
-                        margin=ft.margin.symmetric(vertical=10),
-                        shadow=ft.BoxShadow(
-                            spread_radius=2,
-                            blur_radius=16,
-                            color=ft.Colors.GREY_100,
-                            offset=ft.Offset(0, 6),
-                        ),
+        )
+
+        meta = ft.Text(
+            f"{b['start_date']}  →  {b['end_date']}",
+            size=11,
+            color=UX.MUTED,
+        )
+
+        return ft.Container(
+            content=ft.Column(
+                [
+                    ft.Row(
+                        [
+                            ft.Row(
+                                [
+                                    ft.Icon(ft.Icons.PIE_CHART, color=color, size=24),
+                                    ft.Column(
+                                        [
+                                            ft.Text(
+                                                f"{name}",
+                                                size=16,
+                                                weight=ft.FontWeight.W_600,
+                                                color=UX.TEXT,
+                                            ),
+                                            ft.Row(
+                                                [
+                                                    ft.Container(
+                                                        ft.Text(
+                                                            per_label,
+                                                            size=10,
+                                                            weight=ft.FontWeight.BOLD,
+                                                            color=UX.ACCENT,
+                                                        ),
+                                                        bgcolor=ft.Colors.BLUE_50,
+                                                        padding=ft.padding.symmetric(
+                                                            horizontal=8, vertical=2
+                                                        ),
+                                                        border_radius=UX.R_SM,
+                                                    ),
+                                                    badge_ctrl,
+                                                ],
+                                                spacing=6,
+                                            ),
+                                        ],
+                                        spacing=3,
+                                    ),
+                                ],
+                                spacing=12,
+                            ),
+                            ft.Row(
+                                [
+                                    ft.IconButton(
+                                        icon=ft.Icons.EDIT,
+                                        tooltip="Edit",
+                                        on_click=lambda e, bb=b: open_edit(bb),
+                                        style=ft.ButtonStyle(
+                                            bgcolor=ft.Colors.GREY_100,
+                                            color=UX.ACCENT,
+                                            shape=ft.RoundedRectangleBorder(
+                                                radius=UX.R_SM
+                                            ),
+                                        ),
+                                    ),
+                                    ft.IconButton(
+                                        icon=ft.Icons.DELETE_ROUNDED,
+                                        tooltip="Delete",
+                                        on_click=lambda e,
+                                        bid=b["id"]: delete_budget_ui(bid),
+                                        style=ft.ButtonStyle(
+                                            bgcolor=ft.Colors.GREY_100,
+                                            color=UX.DANGER,
+                                            shape=ft.RoundedRectangleBorder(
+                                                radius=UX.R_SM
+                                            ),
+                                        ),
+                                    ),
+                                ],
+                                spacing=6,
+                            ),
+                        ],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                     ),
-                    elevation=0,
+                    prog_stack,
+                    ft.Row(
+                        [
+                            meta,
+                            ft.Text(
+                                f"Remaining: {max(b['amount'] - spent, 0):.2f}",
+                                size=11,
+                                color=UX.MUTED,
+                            ),
+                        ],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    ),
+                ],
+                spacing=14,
+            ),
+            padding=ft.padding.all(20),
+            bgcolor=UX.SURFACE,
+            border_radius=UX.R_LG,
+            shadow=UX.SHADOW,
+        )
+
+    def refresh_budgets():
+        budgets_container.controls.clear()
+        budgets = get_budgets()
+        selected_period = filter_period.value
+        overshoot_shown = False
+
+        # Optional: sort budgets by end_date ascending
+        budgets.sort(key=lambda x: (x["end_date"], x["category_id"]))
+
+        for b in budgets:
+            if (
+                selected_period
+                and selected_period != "all"
+                and b["period"] != selected_period
+            ):
+                continue
+            spent = get_category_spend(b["category_id"], b["start_date"], b["end_date"])
+            percent = spent / b["amount"] if b["amount"] > 0 else 0
+            if percent >= 1 and not overshoot_shown:
+                show_overshoot_alert(
+                    category_map.get(b["category_id"], "Unknown"), spent, b["amount"]
+                )
+                overshoot_shown = True
+            card = build_budget_card(b, spent, percent)
+            budgets_container.controls.append(card)
+
+        if not budgets_container.controls:
+            budgets_container.controls.append(
+                ft.Container(
+                    ft.Text(
+                        "No budgets match current filter.",
+                        color=UX.MUTED,
+                        size=14,
+                    ),
+                    padding=30,
+                    alignment=ft.alignment.center,
+                    bgcolor=UX.SURFACE,
+                    border_radius=UX.R_LG,
                 )
             )
-        page.update()
+        if budgets_container.page:
+            budgets_container.update()
 
-    refresh_budgets()
+    filter_period.on_change = lambda e: refresh_budgets()
 
-    return ft.Column(
-        [
-            ft.Text(
-                "Budgets Overview",
-                style="headlineSmall",
-                size=32,
-                weight=ft.FontWeight.BOLD,
-            ),
-            ft.Container(
+    # ------------- Add Budget Logic -------------
+    def submit_add(e):
+        form_feedback.value = ""
+        try:
+            if not category_field.value:
+                form_feedback.value = "Select a category."
+                page.update()
+                return
+            if not period_field.value:
+                form_feedback.value = "Select a period."
+                page.update()
+                return
+            amount = parse_float(amount_field.value, -1)
+            if amount <= 0:
+                form_feedback.value = "Amount must be greater than 0."
+                page.update()
+                return
+
+            per = period_field.value
+            if per == "custom":
+                if not start_field.value or not end_field.value:
+                    form_feedback.value = (
+                        "Provide start and end dates for custom period."
+                    )
+                    page.update()
+                    return
+                s_val = start_field.value.strip()
+                e_val = end_field.value.strip()
+            else:
+                # Already auto-filled
+                s_val = start_field.value
+                e_val = end_field.value
+
+            add_budget(
+                int(category_field.value),
+                per,
+                amount,
+                s_val,
+                e_val,
+            )
+            snack("Budget added", UX.SUCCESS)
+            # Reset minimal fields
+            amount_field.value = ""
+            form_feedback.value = ""
+            refresh_budgets()
+            page.update()
+        except Exception as ex:
+            form_feedback.value = f"Error: {ex}"
+            page.update()
+
+    add_btn = ft.ElevatedButton(
+        "Add Budget",
+        icon=ft.Icons.ADD_CIRCLE,
+        bgcolor=UX.ACCENT,
+        color=ft.Colors.WHITE,
+        on_click=submit_add,
+        style=ft.ButtonStyle(
+            shape=ft.RoundedRectangleBorder(radius=UX.R_MD),
+            elevation=4,
+        ),
+        height=44,
+    )
+
+    # ------------- Layout: Add Form Card -------------
+    add_form_card = ft.Container(
+        ft.Column(
+            [
                 ft.Row(
                     [
-                        category_field,
-                        period_field,
-                        amount_field,
-                        start_date_field,
-                        end_date_field,
-                        add_btn,
+                        ft.Text("Create Budget", size=22, weight=ft.FontWeight.W_600),
+                        ft.Container(expand=True),
+                        filter_period,
                     ],
-                    spacing=18,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
-                padding=ft.padding.all(18),
-                bgcolor=ft.Colors.GREY_50,
-                border_radius=14,
-                shadow=ft.BoxShadow(
-                    spread_radius=1,
-                    blur_radius=8,
-                    color=ft.Colors.GREY_100,
-                    offset=ft.Offset(0, 2),
+                ft.Divider(
+                    height=18, color=ft.Colors.with_opacity(0.07, ft.Colors.BLACK)
                 ),
-                margin=ft.margin.only(bottom=18),
-            ),
-            feedback_text,
-            ft.Divider(),
-            budgets_list,
-        ],
-        spacing=24,
+                ft.ResponsiveRow(
+                    [
+                        ft.Container(category_field, col={"xs": 12, "md": 3}),
+                        ft.Container(period_field, col={"xs": 6, "md": 2}),
+                        ft.Container(amount_field, col={"xs": 6, "md": 2}),
+                        ft.Container(start_field, col={"xs": 6, "md": 2}),
+                        ft.Container(end_field, col={"xs": 6, "md": 2}),
+                        ft.Container(add_btn, col={"xs": 12, "md": 1}),
+                    ],
+                    run_spacing=12,
+                ),
+                ft.Row(
+                    [
+                        quick_row,
+                        ft.Container(expand=True),
+                        form_feedback,
+                    ],
+                    alignment=ft.MainAxisAlignment.START,
+                ),
+            ],
+            spacing=18,
+        ),
+        width=1000,
+        padding=ft.padding.all(28),
+        bgcolor=UX.SURFACE,
+        border_radius=UX.R_XL,
+        shadow=UX.SHADOW,
+        margin=ft.margin.only(top=30, bottom=12),
     )
+
+    # ------------- Initial Refresh -------------
+    # Ensure initial period logic
+    update_form_visibility()
+    refresh_budgets()
+
+    # ------------- Root Layout -------------
+    root = ft.Container(
+        content=ft.Column(
+            [
+                ft.Text(
+                    "Budgets Overview",
+                    size=30,
+                    weight=ft.FontWeight.W_600,
+                    color=UX.TEXT,
+                ),
+                add_form_card,
+                ft.Container(
+                    ft.Column(
+                        [
+                            ft.Text(
+                                "Active Budgets",
+                                size=22,
+                                weight=ft.FontWeight.W_600,
+                                color=UX.TEXT,
+                            ),
+                            budgets_container,
+                        ],
+                        spacing=22,
+                    ),
+                    width=1000,
+                    padding=ft.padding.only(bottom=40),
+                ),
+            ],
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            scroll="auto",
+            spacing=8,
+        ),
+        expand=True,
+        alignment=ft.alignment.top_center,
+        bgcolor=UX.BG,
+    )
+
+    return root
