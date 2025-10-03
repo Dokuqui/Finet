@@ -1,13 +1,13 @@
 import flet as ft
+from app.startup import initialize
 from app.ui.dashboard import dashboard_page
 from app.ui.transactions import transactions_page
 from app.ui.accounts import accounts_page
 from app.ui.budgets import budgets_page
-from app.db.connection import init_db
 
 
 def main(page: ft.Page):
-    init_db()
+    initialize()
     page.title = "Finet - Personal Finance Tracker"
     page.bgcolor = ft.Colors.GREY_50
 

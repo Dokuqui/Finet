@@ -2,8 +2,6 @@ import flet as ft
 import flet.canvas as cv
 from datetime import datetime, timedelta
 from collections import defaultdict
-import math
-
 from app.db.transactions import (
     get_recent_transactions,
     get_transactions_for_analytics,
@@ -19,7 +17,6 @@ from app.db.budgets import get_budgets
 
 
 class Theme:
-    # Core palette (light mode)
     BG = ft.Colors.GREY_50
     SURFACE = ft.Colors.WHITE
     SURFACE_SUBTLE = ft.Colors.GREY_100
@@ -36,13 +33,11 @@ class Theme:
     PURPLE = ft.Colors.PURPLE_400
     AMBER = ft.Colors.AMBER_400
 
-    # Radii
     R_SM = 8
     R_MD = 14
     R_LG = 20
     R_XL = 26
 
-    # Shadows
     SHADOW_LIGHT = ft.BoxShadow(
         spread_radius=1,
         blur_radius=18,
@@ -70,17 +65,6 @@ class Theme:
     ]
 
 
-# (Optional future) toggle to dark mode:
-def apply_dark_mode(t: Theme):
-    # Example alt palette (not wired to UI yet)
-    t.BG = ft.Colors.GREY_900
-    t.SURFACE = ft.Colors.GREY_800
-    t.SURFACE_SUBTLE = ft.Colors.GREY_700
-    t.TEXT = ft.Colors.GREY_50
-    t.TEXT_MUTED = ft.Colors.GREY_400
-    t.BORDER = ft.Colors.GREY_600
-
-
 THEME = Theme()
 
 TIMEFRAME_OPTIONS = [
@@ -91,7 +75,7 @@ TIMEFRAME_OPTIONS = [
 ]
 
 # ============================================================
-# UTILS
+# UTILITIES
 # ============================================================
 
 
@@ -187,7 +171,7 @@ def Card(
                 )
             )
         txt_col = [
-            ft.Text(title, size=17, weight=ft.FontWeight.W_600, color=THEME.TEXT),
+            ft.Text(title, size=17, weight=ft.FontWeight.W_600, color=THEME.TEXT)
         ]
         if subtitle:
             txt_col.append(ft.Text(subtitle, size=11, color=THEME.TEXT_MUTED))
@@ -207,19 +191,6 @@ def Card(
         bgcolor=bg,
         border_radius=THEME.R_XL,
         shadow=THEME.SHADOW_LIGHT if variant == "default" else THEME.SHADOW_SOFT,
-        animate=ft.Animation(250, "ease"),
-        on_hover=lambda e: setattr(
-            e.control,
-            "shadow",
-            ft.BoxShadow(
-                spread_radius=1,
-                blur_radius=24,
-                color=ft.Colors.with_opacity(0.10, ft.Colors.BLACK),
-                offset=ft.Offset(0, 8),
-            ),
-        )
-        if e.data == "true"
-        else setattr(e.control, "shadow", THEME.SHADOW_LIGHT),
     )
 
 
@@ -390,7 +361,7 @@ def build_accounts_section(accounts) -> ft.Control:
 
 
 # ============================================================
-# CATEGORY BAR CHART
+# CATEGORY BAR CHART (signed amounts)
 # ============================================================
 
 
@@ -402,13 +373,12 @@ def build_category_bar_chart(cat_amounts: dict[str, float]) -> ft.Control:
             icon=ft.Icons.DONUT_SMALL,
         )
 
-    # Sort by absolute amount
     cat_amounts = dict(
         sorted(cat_amounts.items(), key=lambda x: abs(x[1]), reverse=True)
     )
-    max_amount = max([abs(v) for v in cat_amounts.values()]) or 1
-    bar_h = 30
-    gap = 18
+    max_amount = max((abs(v) for v in cat_amounts.values()), default=0) or 1
+    bar_h = 26
+    gap = 16
     bar_x = 160
     usable_w = 360
     top_pad = 10
@@ -416,10 +386,11 @@ def build_category_bar_chart(cat_amounts: dict[str, float]) -> ft.Control:
     shapes: list[cv.Shape] = []
     for idx, (cat, amt) in enumerate(cat_amounts.items()):
         y = top_pad + idx * (bar_h + gap)
-        ratio = abs(amt) / max_amount
+        abs_amt = abs(amt)
+        ratio = abs_amt / max_amount
         bar_w = max(2, int(usable_w * ratio))
-        color = THEME.CHART_COLORS[idx % len(THEME.CHART_COLORS)]
-        # rail
+        is_expense = amt < 0
+        color = THEME.NEGATIVE if is_expense else THEME.POSITIVE
         shapes.append(
             cv.Rect(
                 x=bar_x,
@@ -429,7 +400,6 @@ def build_category_bar_chart(cat_amounts: dict[str, float]) -> ft.Control:
                 paint=ft.Paint(color=THEME.SURFACE_SUBTLE),
             )
         )
-        # fill
         shapes.append(
             cv.Rect(
                 x=bar_x,
@@ -439,26 +409,24 @@ def build_category_bar_chart(cat_amounts: dict[str, float]) -> ft.Control:
                 paint=ft.Paint(color=color),
             )
         )
-        # name
         shapes.append(
             cv.Text(
                 12,
-                y + 8,
+                y + 6,
                 cat,
                 ft.TextStyle(size=13, weight=ft.FontWeight.W_600, color=THEME.TEXT),
             )
         )
-        # value
         shapes.append(
             cv.Text(
                 bar_x + bar_w + 12,
-                y + 8,
-                fmt_number(amt),
+                y + 6,
+                fmt_number(abs_amt),
                 ft.TextStyle(size=12, color=color, weight=ft.FontWeight.BOLD),
             )
         )
 
-    canvas_h = max(120, top_pad + len(cat_amounts) * (bar_h + gap))
+    canvas_h = max(100, top_pad + len(cat_amounts) * (bar_h + gap))
     canvas = cv.Canvas(width=560, height=canvas_h, shapes=shapes)
 
     total_abs = sum(abs(v) for v in cat_amounts.values()) or 1
@@ -470,7 +438,7 @@ def build_category_bar_chart(cat_amounts: dict[str, float]) -> ft.Control:
                     ft.Container(
                         width=10,
                         height=10,
-                        bgcolor=THEME.CHART_COLORS[i % len(THEME.CHART_COLORS)],
+                        bgcolor=THEME.NEGATIVE if v < 0 else THEME.POSITIVE,
                         border_radius=3,
                     ),
                     ft.Text(
@@ -481,7 +449,7 @@ def build_category_bar_chart(cat_amounts: dict[str, float]) -> ft.Control:
                 ],
                 spacing=6,
             )
-            for i, (k, v) in enumerate(legend_items)
+            for k, v in legend_items
         ],
         spacing=6,
     )
@@ -523,7 +491,6 @@ def build_income_expense_line_chart(month_income, month_expense) -> ft.Control:
         return mt + (plot_h - int(plot_h * r))
 
     shapes: list[cv.Shape] = []
-    # grid
     steps = 5
     for i in range(steps + 1):
         val = max_val * i / steps
@@ -541,7 +508,7 @@ def build_income_expense_line_chart(month_income, month_expense) -> ft.Control:
                 ft.TextStyle(size=11, color=THEME.TEXT_MUTED),
             )
         )
-    # axes
+
     shapes.append(
         cv.Line(
             x1=ml, y1=mt, x2=ml, y2=mt + plot_h, paint=ft.Paint(color=THEME.TEXT_MUTED)
@@ -556,6 +523,7 @@ def build_income_expense_line_chart(month_income, month_expense) -> ft.Control:
             paint=ft.Paint(color=THEME.TEXT_MUTED),
         )
     )
+
     for idx, m in enumerate(months):
         x = x_pos(idx)
         shapes.append(
@@ -597,7 +565,6 @@ def build_income_expense_line_chart(month_income, month_expense) -> ft.Control:
     plot(income_map, THEME.POSITIVE, lift=True)
     plot(expense_map, THEME.NEGATIVE, lift=False)
 
-    # Legend
     lx, ly = ml, mt - 18
     for label, color in [("Income", THEME.POSITIVE), ("Expense", THEME.NEGATIVE)]:
         shapes.append(
@@ -677,7 +644,6 @@ def build_daily_spend_sparkline(txs: list[dict], days: int = 14) -> ft.Control:
         shapes.append(cv.Circle(x=x, y=y, radius=3, paint=ft.Paint(color=THEME.AMBER)))
         last = (x, y)
 
-    # baseline
     shapes.append(
         cv.Line(
             x1=ml,
@@ -708,7 +674,6 @@ def build_daily_spend_sparkline(txs: list[dict], days: int = 14) -> ft.Control:
         ],
         spacing=16,
     )
-
     canvas = cv.Canvas(width=width, height=height, shapes=shapes)
     return Card(
         ft.Column([canvas, footer], spacing=10),
@@ -728,7 +693,6 @@ def build_budget_chart(budgets: list[dict], cat_dict: dict[int, str]) -> ft.Cont
             empty_state("Budgets"), title="Budget Utilization", icon=ft.Icons.DATA_USAGE
         )
 
-    # Precompute spent (avoid duplicate DB calls inside loops for alert and canvas)
     spent_map = {}
     for b in budgets:
         spent_map[b["id"]] = get_category_spend(
@@ -741,22 +705,20 @@ def build_budget_chart(budgets: list[dict], cat_dict: dict[int, str]) -> ft.Cont
     bar_x = 200
     width_full = 320
     top = 10
-
     alerts = []
+
     for idx, b in enumerate(budgets):
         spent = spent_map[b["id"]]
         amount = b["amount"] or 0
-        pct = min(spent / amount, 1.0) if amount > 0 else 0
+        pct = min(abs(spent) / amount, 1.0) if amount > 0 else 0
         base_y = top + idx * (bar_h + gap)
-
-        rail_color = THEME.SURFACE_SUBTLE
         shapes.append(
             cv.Rect(
                 x=bar_x,
                 y=base_y,
                 width=width_full,
                 height=bar_h,
-                paint=ft.Paint(color=rail_color),
+                paint=ft.Paint(color=THEME.SURFACE_SUBTLE),
             )
         )
         if pct < 0.8:
@@ -829,10 +791,7 @@ def build_budget_chart(budgets: list[dict], cat_dict: dict[int, str]) -> ft.Cont
         )
 
     return Card(
-        ft.Column(
-            [canvas] + (alert_controls if alert_controls else []),
-            spacing=12,
-        ),
+        ft.Column([canvas] + alert_controls, spacing=12),
         title="Budget Utilization",
         icon=ft.Icons.DATA_USAGE,
     )
@@ -861,7 +820,7 @@ def build_recent_transactions(limit=8) -> ft.Control:
                     [
                         ft.Text(r.date, width=90, size=11, color=THEME.TEXT_MUTED),
                         ft.Text(
-                            f"{fmt_number(r.amount)} {r.currency}",
+                            f"{fmt_number(abs(r.amount))} {r.currency}",
                             width=130,
                             size=12,
                             weight=ft.FontWeight.W_600,
@@ -897,7 +856,7 @@ def build_recent_transactions(limit=8) -> ft.Control:
 
 
 # ============================================================
-# DASHBOARD ASSEMBLY
+# DASHBOARD CONTENT
 # ============================================================
 
 
@@ -908,12 +867,10 @@ def build_dashboard_content(timeframe_code: str) -> ft.Control:
     cat_map = {c["id"]: c["name"] for c in categories}
     filtered = filter_transactions_by_timeframe(txs_all, timeframe_code)
 
-    # Category sums (filtered)
     cat_amounts = defaultdict(float)
     for t in filtered:
         cat_amounts[cat_map.get(t["category_id"], "Other")] += float(t["amount"])
 
-    # Monthly series
     month_income = defaultdict(float)
     month_expense = defaultdict(float)
     for t in filtered:
@@ -926,10 +883,8 @@ def build_dashboard_content(timeframe_code: str) -> ft.Control:
 
     income_series = sorted(month_income.items(), key=lambda x: x[0])
     expense_series = sorted(month_expense.items(), key=lambda x: x[0])
-
     budgets = get_budgets()
 
-    # Sections
     kpi_row = build_kpi_row(filtered)
     accounts_section = build_accounts_section(accounts)
     category_chart = build_category_bar_chart(dict(cat_amounts))
@@ -948,7 +903,6 @@ def build_dashboard_content(timeframe_code: str) -> ft.Control:
         spacing=24,
         expand=1,
     )
-
     right_col = ft.Column(
         [
             line_chart,
@@ -958,7 +912,6 @@ def build_dashboard_content(timeframe_code: str) -> ft.Control:
         spacing=24,
         expand=1,
     )
-
     return ft.ResponsiveRow(
         [
             ft.Container(left_col, col={"xs": 12, "md": 6}),
@@ -985,10 +938,8 @@ def dashboard_page(page: ft.Page):
         options=[ft.dropdown.Option(k, text=v) for k, v in TIMEFRAME_OPTIONS],
     )
 
-    # Initial render
     content_container.content = build_dashboard_content(timeframe_dropdown.value)
 
-    # Header chips
     timestamp_chip = ft.Container(
         ft.Text(
             f"Data as of {datetime.now().strftime('%Y-%m-%d %H:%M')}",
@@ -1023,7 +974,6 @@ def dashboard_page(page: ft.Page):
         )
 
     def timeframe_changed(e):
-        # Loading placeholder
         content_container.content = ft.Container(
             ft.Row(
                 [
@@ -1037,10 +987,8 @@ def dashboard_page(page: ft.Page):
         )
         content_container.update()
 
-        # Rebuild content
         content_container.content = build_dashboard_content(timeframe_dropdown.value)
         update_timeframe_label()
-        # Refresh timestamp
         timestamp_chip.content = ft.Text(
             f"Data as of {datetime.now().strftime('%Y-%m-%d %H:%M')}",
             size=11,

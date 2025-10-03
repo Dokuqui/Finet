@@ -1,38 +1,39 @@
+from dataclasses import dataclass
+
+
+@dataclass
 class Transaction:
-    def __init__(
-        self,
-        id,
-        date,
-        amount,
-        category_id,
-        account_id,
-        notes,
-        currency,
-        category_name=None,
-        category_icon=None,
-    ):
-        self.id = id
-        self.date = date
-        self.amount = amount
-        self.category_id = category_id
-        self.account_id = account_id
-        self.notes = notes
-        self.currency = currency
-        self.category_name = category_name
-        self.category_icon = category_icon
+    id: int
+    date: str
+    amount: float
+    category_id: int | None
+    account_id: int | None
+    notes: str | None
+    currency: str
+    category_name: str | None = None
+    category_icon: str | None = None
+    recurring_id: int | None = None
+    occurrence_date: str | None = None
 
     @classmethod
     def from_row(cls, row):
+        def _get(r, key):
+            try:
+                return r[key]
+            except Exception:
+                return None
         return cls(
-            row["id"],
-            row["date"],
-            row["amount"],
-            row["category_id"],
-            row["account_id"],
-            row["notes"],
-            row["currency"],
-            row["category_name"] if "category_name" in row.keys() else None,
-            row["category_icon"] if "category_icon" in row.keys() else "Other",
+            id=_get(row, "id"),
+            date=_get(row, "date"),
+            amount=_get(row, "amount"),
+            category_id=_get(row, "category_id"),
+            account_id=_get(row, "account_id"),
+            notes=_get(row, "notes"),
+            currency=_get(row, "currency"),
+            category_name=_get(row, "category_name"),
+            category_icon=_get(row, "category_icon"),
+            recurring_id=_get(row, "recurring_id"),
+            occurrence_date=_get(row, "occurrence_date"),
         )
 
 
