@@ -1,6 +1,7 @@
 import flet as ft
 from app.startup import initialize
 from app.ui.dashboard import dashboard_page
+from app.ui.settings import settings_page
 from app.ui.transactions import transactions_page
 from app.ui.accounts import accounts_page
 from app.ui.budgets import budgets_page
@@ -11,7 +12,7 @@ def main(page: ft.Page):
     page.title = "Finet - Personal Finance Tracker"
     page.bgcolor = ft.Colors.GREY_50
 
-    tab_contents = [dashboard_page, transactions_page, accounts_page, budgets_page]
+    tab_contents = [dashboard_page, transactions_page, accounts_page, budgets_page, settings_page]
 
     def on_tab_change(e):
         idx = tabs.selected_index
@@ -25,6 +26,7 @@ def main(page: ft.Page):
             ft.Tab(text="Transactions", content=transactions_page(page)),
             ft.Tab(text="Accounts", content=accounts_page(page)),
             ft.Tab(text="Budgets", content=budgets_page(page)),
+            ft.Tab(text="Settings", content=settings_page(page))
         ],
         indicator_color=ft.Colors.BLUE_400,
         label_color=ft.Colors.GREY_900,

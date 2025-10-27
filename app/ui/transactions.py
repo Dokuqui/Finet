@@ -244,6 +244,15 @@ def transactions_page(page: ft.Page):
         value="Other",
         width=170,
     )
+    add_category_type = ft.Dropdown(
+        label="Type",
+        options=[
+            ft.dropdown.Option("expense", "Expense (Money out)"),
+            ft.dropdown.Option("income", "Income (Money in)"),
+        ],
+        value="expense",
+        width=230,
+    )
     add_icon_preview = ft.Icon(get_icon_by_name("Other"), size=34)
     add_feedback = ft.Text("", color=UX.NEGATIVE, size=12)
 
@@ -256,6 +265,7 @@ def transactions_page(page: ft.Page):
     def open_add_category(e=None):
         add_category_name.value = ""
         add_category_icon.value = "Other"
+        add_category_type.value = "expense"
         add_icon_preview.name = get_icon_by_name("Other")
         add_feedback.value = ""
         add_dialog.open = True
@@ -273,7 +283,8 @@ def transactions_page(page: ft.Page):
             page.update()
             return
         try:
-            add_category(name, add_category_icon.value)
+            cat_type = add_category_type.value or "expense"
+            add_category(name, add_category_icon.value, cat_type)
             close_add_category()
             refresh_categories_main()
             notify("Category added", UX.POSITIVE)
@@ -289,6 +300,7 @@ def transactions_page(page: ft.Page):
                     [add_category_name, ft.Container(width=10), add_category_icon],
                     spacing=0,
                 ),
+                add_category_type,
                 ft.Row(
                     [
                         ft.Container(
@@ -334,6 +346,15 @@ def transactions_page(page: ft.Page):
         value="Other",
         width=170,
     )
+    edit_category_type = ft.Dropdown(
+        label="Type",
+        options=[
+            ft.dropdown.Option("expense", "Expense (Money out)"),
+            ft.dropdown.Option("income", "Income (Money in)"),
+        ],
+        value="expense",
+        width=230,
+    )
     edit_icon_preview = ft.Icon(get_icon_by_name("Other"), size=34)
     edit_feedback = ft.Text("", color=UX.NEGATIVE, size=12)
 
@@ -348,6 +369,7 @@ def transactions_page(page: ft.Page):
         edit_category_name.value = cat["name"]
         icon_val = cat.get("icon") or "Other"
         edit_category_icon.value = icon_val
+        edit_category_type.value = cat.get("type") or "expense"
         edit_icon_preview.name = get_icon_by_name(icon_val)
         edit_feedback.value = ""
         edit_dialog.open = True
@@ -365,7 +387,10 @@ def transactions_page(page: ft.Page):
             page.update()
             return
         try:
-            update_category(edit_category_id[0], name, edit_category_icon.value)
+            cat_type = edit_category_type.value or "expense"
+            update_category(
+                edit_category_id[0], name, edit_category_icon.value, cat_type
+            )
             close_edit_category()
             refresh_categories_main()
             refresh_category_list()
@@ -382,6 +407,7 @@ def transactions_page(page: ft.Page):
                     [edit_category_name, ft.Container(width=10), edit_category_icon],
                     spacing=0,
                 ),
+                edit_category_type,
                 ft.Row(
                     [
                         ft.Container(
@@ -489,6 +515,8 @@ def transactions_page(page: ft.Page):
             rows = []
             for cat in cats:
                 icon_name = cat.get("icon") or "Other"
+                cat_type = cat.get("type", "expense")
+                type_color = UX.POSITIVE if cat_type == "income" else UX.NEGATIVE
                 chip = ft.Container(
                     ft.Row(
                         [
@@ -496,6 +524,15 @@ def transactions_page(page: ft.Page):
                                 get_icon_by_name(icon_name), size=20, color=UX.ACCENT
                             ),
                             ft.Text(cat["name"], size=13, weight=ft.FontWeight.W_500),
+                            ft.Text(
+                                cat_type.upper(),
+                                size=10,
+                                weight=ft.FontWeight.BOLD,
+                                color=type_color,
+                            ),
+                            ft.Container(
+                                expand=True
+                            ),
                             ft.IconButton(
                                 icon=ft.Icons.EDIT,
                                 tooltip="Edit",
@@ -725,7 +762,9 @@ def transactions_page(page: ft.Page):
             transaction_list.update()
 
     # ---------- Add Transaction Logic ----------
-    INCOME_CATEGORIES = {"salary"}  # extend as needed
+
+    # REMOVED: This is no longer needed
+    # INCOME_CATEGORIES = {"salary"}  # extend as needed
 
     def reset_form():
         amount_field.value = "0.00"
@@ -767,10 +806,13 @@ def transactions_page(page: ft.Page):
         currency = currency_field.value
 
         cats_now = fetch_categories()
-        category_name = next(
-            (c["name"] for c in cats_now if c["id"] == category_id), "Other"
-        )
-        is_income = category_name.lower() in INCOME_CATEGORIES
+        category_obj = next((c for c in cats_now if c["id"] == category_id), None)
+
+        if not category_obj:
+            notify("Category not found. Please refresh.", UX.NEGATIVE)
+            return
+
+        is_income = category_obj.get("type") == "income"
         signed_amount = raw_amt if is_income else -abs(raw_amt)
 
         # Recurring branch
@@ -808,7 +850,7 @@ def transactions_page(page: ft.Page):
             create_recurring(
                 account_id=account_id,
                 category_id=category_id,
-                amount=signed_amount,
+                amount=signed_amount,  # Pass the calculated signed amount
                 currency=currency,
                 frequency=freq,
                 start_date=date_iso,
@@ -831,7 +873,7 @@ def transactions_page(page: ft.Page):
         # Normal single transaction
         add_transaction(
             date_iso,
-            signed_amount,
+            signed_amount,  # Pass the calculated signed amount
             category_id,
             account_id,
             notes_field.value.strip(),
@@ -898,22 +940,36 @@ def transactions_page(page: ft.Page):
             return
         try:
             imported, skipped = 0, 0
+            all_categories = fetch_categories()
+            cat_map_by_name = {c["name"].lower(): c for c in all_categories}
+            other_cat_id = get_category_id_by_name("Other")
+
             with open(path, "r", encoding="utf-8") as f:
                 reader = csv.DictReader(f)
                 for row in reader:
-                    cat_id = get_category_id_by_name(row["category"])
-                    if cat_id is None:
-                        cat_id = get_category_id_by_name("Other")
+                    cat_name = row.get("category", "").lower()
+                    category = cat_map_by_name.get(cat_name)
+
+                    cat_id = None
+                    if category:
+                        cat_id = category["id"]
+                    else:
+                        cat_id = other_cat_id  # Fallback
                         skipped += 1
+
                     try:
                         amt = float(row["amount"])
+
                         add_transaction(
                             row["date"],
-                            amt,  # assuming CSV already uses signed logic or manual fix later
+                            amt,
                             cat_id,
                             int(row["account"]),
                             row.get("notes", ""),
                             row["currency"],
+                        )
+                        increment_account_balance(
+                            int(row["account"]), row["currency"], amt
                         )
                         imported += 1
                     except Exception:
