@@ -54,7 +54,8 @@ def _create_base_tables(conn):
         CREATE TABLE IF NOT EXISTS categories (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE,
-            icon TEXT DEFAULT 'Other'
+            icon TEXT DEFAULT 'Other',
+            type TEXT NOT NULL DEFAULT 'expense' -- ADDED: 'expense' or 'income'
         )
     """)
     # Transactions (initial base schema)
@@ -85,6 +86,19 @@ def _create_base_tables(conn):
             FOREIGN KEY(category_id) REFERENCES categories(id) ON DELETE CASCADE
         )
     """)
+
+
+def _ensure_categories_type_column(conn):
+    """
+    Migration: Add the 'type' column to categories if it doesn't exist.
+    """
+    if not _column_exists(conn, "categories", "type"):
+        try:
+            conn.execute(
+                "ALTER TABLE categories ADD COLUMN type TEXT NOT NULL DEFAULT 'expense'"
+            )
+        except sqlite3.OperationalError:
+            pass
 
 
 def _ensure_recurring_table(conn):
@@ -156,6 +170,7 @@ def _ensure_transactions_indexes(conn):
 def init_db():
     conn = get_db_connection()
     _create_base_tables(conn)
+    _ensure_categories_type_column(conn)
     _ensure_recurring_table(conn)
     _ensure_recurring_columns(conn)
     _ensure_transactions_indexes(conn)
