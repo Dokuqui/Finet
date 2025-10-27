@@ -7,9 +7,8 @@ from .transactions import add_transaction
 from app.db.accounts import increment_account_balance
 from app.db.categories import get_categories
 
-FREQUENCIES = {"daily", "weekly", "monthly", "yearly", "custom_interval"}
+FREQUENCIES = {"daily", "weekly", "monthly", "yearly", "custom_interval", "once"}
 
-# Set True so generation adjusts balances (uses signed amounts).
 ADJUST_BALANCES = True
 
 
@@ -54,7 +53,10 @@ def create_recurring(
 
     start = _parse(start_date)
     if end_date:
-        _parse(end_date)  # validate
+        _parse(end_date)
+
+    if frequency == "once":
+        end_date = _fmt(start)
 
     now_iso = datetime.datetime.utcnow().isoformat()
 
@@ -103,6 +105,37 @@ def list_recurring(active_only: bool = True) -> List[Dict[str, Any]]:
         rows = conn.execute(
             "SELECT * FROM recurring_transactions ORDER BY active DESC, next_occurrence ASC"
         ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_upcoming_recurring(
+    limit: int = 5, days_ahead: int = 30
+) -> List[Dict[str, Any]]:
+    """
+    Get upcoming active recurring transactions within the next X days.
+    """
+    today = _today()
+    end_date = today + datetime.timedelta(days=days_ahead)
+
+    conn = get_db_connection()
+    rows = conn.execute(
+        """
+        SELECT
+            r.*,
+            c.name as category_name,
+            c.icon as category_icon,
+            c.type as category_type
+        FROM recurring_transactions r
+        LEFT JOIN categories c ON r.category_id = c.id
+        WHERE
+            r.active = 1
+            AND r.next_occurrence <= ?
+        ORDER BY r.next_occurrence ASC
+        LIMIT ?
+        """,
+        (_fmt(end_date), limit),
+    ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
@@ -162,6 +195,10 @@ def _compute_next(
     freq = rec.get("frequency")
     if not freq:
         return None
+
+    if freq == "once":
+        return None
+
     end_date = rec.get("end_date")
     end_dt = _parse(end_date) if end_date else None
 
@@ -259,7 +296,7 @@ def generate_due_transactions(today: Optional[datetime.date] = None) -> int:
                         rec["account_id"], rec["currency"], rec["amount"]
                     )
             except sqlite3.IntegrityError:
-                pass  # duplicate occurrence
+                pass
 
             new_next = _compute_next(rec, next_occ)
             if not new_next:

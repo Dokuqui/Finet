@@ -2,14 +2,16 @@ import flet as ft
 import flet.canvas as cv
 from datetime import datetime, timedelta
 from collections import defaultdict
+from app.db.recurring import get_upcoming_recurring
 from app.db.transactions import (
     get_recent_transactions,
     get_transactions_for_analytics,
     get_category_spend,
 )
-from app.db.accounts import get_accounts
+from app.db.accounts import get_accounts, get_low_balance_alerts
 from app.db.categories import get_categories
 from app.db.budgets import get_budgets
+from app.ui.transactions import get_icon_by_name
 
 # ============================================================
 # THEME & DESIGN SYSTEM
@@ -856,6 +858,186 @@ def build_recent_transactions(limit=8) -> ft.Control:
 
 
 # ============================================================
+# UPCOMING BILLS
+# ============================================================
+
+
+def build_upcoming_bills_card(days_ahead=30, limit=7) -> ft.Control:
+    """
+    Creates a card showing upcoming recurring transactions.
+    """
+    try:
+        upcoming = get_upcoming_recurring(limit=limit, days_ahead=days_ahead)
+    except Exception as e:
+        return Card(
+            empty_state("Error", f"Could not load bills: {e}"),
+            title="Upcoming Bills",
+            icon=ft.Icons.CALENDAR_MONTH,
+        )
+
+    if not upcoming:
+        return Card(
+            empty_state(f"No upcoming bills due in the next {days_ahead} days."),
+            title="Upcoming Bills",
+            icon=ft.Icons.CALENDAR_MONTH,
+        )
+
+    rows = []
+    today = datetime.today().date()
+
+    for item in upcoming:
+        due_date_str = item["next_occurrence"]
+        due_date = datetime.fromisoformat(due_date_str).date()
+        delta = (due_date - today).days
+
+        if delta < 0:
+            due_text = "Due Today"
+            due_color = THEME.NEGATIVE
+        elif delta == 0:
+            due_text = "Due Today"
+            due_color = THEME.NEGATIVE
+        elif delta == 1:
+            due_text = "Due Tomorrow"
+            due_color = THEME.WARNING
+        else:
+            due_text = f"Due in {delta} days"
+            due_color = THEME.TEXT_MUTED
+
+        cat_type = item.get("category_type", "expense")
+        amount = float(item["amount"])
+        # Use absolute amount for display, color-code by type
+        amount_abs = abs(amount)
+        amount_color = THEME.POSITIVE if cat_type == "income" else THEME.NEGATIVE
+
+        rows.append(
+            ft.Container(
+                ft.Row(
+                    [
+                        ft.Container(
+                            ft.Icon(
+                                get_icon_by_name(item.get("category_icon", "Other")),
+                                color=amount_color,
+                                size=22,
+                            ),
+                            padding=ft.padding.all(8),
+                            bgcolor=ft.Colors.with_opacity(0.1, amount_color),
+                            border_radius=THEME.R_MD,
+                        ),
+                        ft.Column(
+                            [
+                                ft.Text(
+                                    item.get("category_name", "Unknown"),
+                                    size=13,
+                                    weight=ft.FontWeight.W_600,
+                                ),
+                                ft.Text(
+                                    item.get("notes") or item["frequency"].capitalize(),
+                                    size=10,
+                                    color=THEME.TEXT_MUTED,
+                                    italic=True,
+                                ),
+                            ],
+                            spacing=1,
+                        ),
+                        ft.Container(expand=True),
+                        ft.Column(
+                            [
+                                ft.Text(
+                                    f"{fmt_number(amount_abs)} {item['currency']}",
+                                    size=14,
+                                    weight=ft.FontWeight.BOLD,
+                                    color=amount_color,
+                                ),
+                                ft.Text(
+                                    f"{due_text} ({due_date_str})",
+                                    size=10,
+                                    color=due_color,
+                                    weight=ft.FontWeight.W_600,
+                                ),
+                            ],
+                            spacing=1,
+                            alignment=ft.CrossAxisAlignment.END,
+                        ),
+                    ],
+                    spacing=12,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                padding=ft.padding.symmetric(vertical=8, horizontal=10),
+                border_radius=THEME.R_MD,
+            )
+        )
+
+    return Card(
+        ft.Column(rows, spacing=8),
+        title="Upcoming Bills & Subscriptions",
+        subtitle=f"Next {days_ahead} days",
+        icon=ft.Icons.CALENDAR_MONTH,
+    )
+
+
+# ============================================================
+# NEW: LOW BALANCE ALERTS
+# ============================================================
+
+
+def build_low_balance_alerts_card() -> ft.Control | None:
+    """
+    Creates a card showing accounts below their defined thresholds.
+    Returns None if no alerts.
+    """
+    try:
+        alerts = get_low_balance_alerts()
+    except Exception as e:
+        return Card(
+            empty_state("Error", f"Could not load alerts: {e}"),
+            title="Alerts",
+            icon=ft.Icons.WARNING_AMBER_ROUNDED,
+            variant="accent",
+        )
+
+    if not alerts:
+        return None
+
+    rows = []
+    for alert in alerts:
+        rows.append(
+            ft.Row(
+                [
+                    ft.Icon(
+                        ft.Icons.WARNING_AMBER_ROUNDED,
+                        color=THEME.WARNING,
+                        size=22,
+                    ),
+                    ft.Text(
+                        f"Account '{alert['account_name']}' ({alert['currency']}) is at ",
+                        size=13,
+                        color=THEME.TEXT,
+                    ),
+                    ft.Text(
+                        f"{fmt_number(alert['balance'])}",
+                        size=13,
+                        weight=ft.FontWeight.BOLD,
+                        color=THEME.NEGATIVE,
+                    ),
+                    ft.Text(
+                        f" (Threshold: {fmt_number(alert['balance_threshold'])})",
+                        size=13,
+                        color=THEME.TEXT_MUTED,
+                    ),
+                ],
+                spacing=6,
+                wrap=True,
+            )
+        )
+
+    return Card(
+        ft.Column(rows, spacing=8),
+        title="Low Balance Alerts",
+        icon=ft.Icons.WARNING_AMBER_ROUNDED,
+        variant="accent",
+    )
+
+# ============================================================
 # DASHBOARD CONTENT
 # ============================================================
 
@@ -885,6 +1067,7 @@ def build_dashboard_content(timeframe_code: str) -> ft.Control:
     expense_series = sorted(month_expense.items(), key=lambda x: x[0])
     budgets = get_budgets()
 
+    low_balance_card = build_low_balance_alerts_card()
     kpi_row = build_kpi_row(filtered)
     accounts_section = build_accounts_section(accounts)
     category_chart = build_category_bar_chart(dict(cat_amounts))
@@ -892,23 +1075,33 @@ def build_dashboard_content(timeframe_code: str) -> ft.Control:
     budget_chart = build_budget_chart(budgets, cat_map)
     sparkline = build_daily_spend_sparkline(filtered, 14)
     recent_section = build_recent_transactions()
+    upcoming_bills_section = build_upcoming_bills_card(days_ahead=30, limit=7)
+    
+
+    left_col_controls = [
+        accounts_section,
+        Card(kpi_row, title="Key Metrics", icon=ft.Icons.INSIGHTS),
+        category_chart,
+        budget_chart,
+    ]
+    
+    right_col_controls = [
+        line_chart,
+        sparkline,
+        upcoming_bills_section,
+        recent_section,
+    ]
+
+    if low_balance_card:
+        right_col_controls.insert(0, low_balance_card)
 
     left_col = ft.Column(
-        [
-            accounts_section,
-            Card(kpi_row, title="Key Metrics", icon=ft.Icons.INSIGHTS),
-            category_chart,
-            budget_chart,
-        ],
+        left_col_controls,
         spacing=24,
         expand=1,
     )
     right_col = ft.Column(
-        [
-            line_chart,
-            sparkline,
-            recent_section,
-        ],
+        right_col_controls,
         spacing=24,
         expand=1,
     )
