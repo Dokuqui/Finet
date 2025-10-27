@@ -530,9 +530,7 @@ def transactions_page(page: ft.Page):
                                 weight=ft.FontWeight.BOLD,
                                 color=type_color,
                             ),
-                            ft.Container(
-                                expand=True
-                            ),
+                            ft.Container(expand=True),
                             ft.IconButton(
                                 icon=ft.Icons.EDIT,
                                 tooltip="Edit",
@@ -576,17 +574,18 @@ def transactions_page(page: ft.Page):
             category_field.update()
 
     # ---------- Recurring Controls ----------
-    recurring_switch = ft.Switch(label="Recurring", value=False)
+    recurring_switch = ft.Switch(label="Recurring or Planned", value=False)
     frequency_field = ft.Dropdown(
         label="Frequency",
         options=[
+            ft.dropdown.Option("once", "One-Time (Planned)"),
             ft.dropdown.Option("daily"),
             ft.dropdown.Option("weekly"),
             ft.dropdown.Option("monthly"),
             ft.dropdown.Option("yearly"),
             ft.dropdown.Option("custom_interval"),
         ],
-        width=160,
+        width=180,
         visible=False,
     )
     interval_field = ft.TextField(
@@ -611,15 +610,18 @@ def transactions_page(page: ft.Page):
     def _toggle_recurring(e):
         show = recurring_switch.value
         frequency_field.visible = show
-        end_date_field.visible = show
-        interval_field.visible = show and (frequency_field.value == "custom_interval")
-        day_of_month_field.visible = show and (frequency_field.value == "monthly")
+        
+        freq = frequency_field.value
+        end_date_field.visible = show and (freq != 'once')
+        interval_field.visible = show and (freq == "custom_interval")
+        day_of_month_field.visible = show and (freq == "monthly")
         page.update()
 
     def _freq_changed(e):
         freq = frequency_field.value
         interval_field.visible = freq == "custom_interval"
         day_of_month_field.visible = freq == "monthly"
+        end_date_field.visible = freq != 'once' 
         page.update()
 
     recurring_switch.on_change = _toggle_recurring

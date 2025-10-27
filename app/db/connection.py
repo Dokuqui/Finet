@@ -45,6 +45,7 @@ def _create_base_tables(conn):
             account_id INTEGER NOT NULL,
             currency TEXT NOT NULL,
             balance REAL DEFAULT 0,
+            balance_threshold REAL, -- ADDED: For low balance alerts
             UNIQUE(account_id, currency),
             FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
         )
@@ -55,7 +56,7 @@ def _create_base_tables(conn):
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE,
             icon TEXT DEFAULT 'Other',
-            type TEXT NOT NULL DEFAULT 'expense' -- ADDED: 'expense' or 'income'
+            type TEXT NOT NULL DEFAULT 'expense'
         )
     """)
     # Transactions (initial base schema)
@@ -96,6 +97,19 @@ def _ensure_categories_type_column(conn):
         try:
             conn.execute(
                 "ALTER TABLE categories ADD COLUMN type TEXT NOT NULL DEFAULT 'expense'"
+            )
+        except sqlite3.OperationalError:
+            pass
+
+
+def _ensure_balances_threshold_column(conn):
+    """
+    Migration: Add the 'balance_threshold' column to account_balances.
+    """
+    if not _column_exists(conn, "account_balances", "balance_threshold"):
+        try:
+            conn.execute(
+                "ALTER TABLE account_balances ADD COLUMN balance_threshold REAL"
             )
         except sqlite3.OperationalError:
             pass
@@ -171,6 +185,7 @@ def init_db():
     conn = get_db_connection()
     _create_base_tables(conn)
     _ensure_categories_type_column(conn)
+    _ensure_balances_threshold_column(conn)
     _ensure_recurring_table(conn)
     _ensure_recurring_columns(conn)
     _ensure_transactions_indexes(conn)

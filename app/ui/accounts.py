@@ -4,8 +4,11 @@ from app.db.accounts import (
     get_accounts,
     add_account,
     add_account_balance,
+    set_account_balance_threshold,
     update_account,
     delete_account,
+    get_account_balances,
+    delete_account_balance,
 )
 
 ACCOUNT_TYPES = ["Cash", "Bank", "Credit Card"]
@@ -24,13 +27,13 @@ def accounts_page(page: ft.Page):
 
     page.bgcolor = BG
 
-    def parse_amount(v: str) -> float:
+    def parse_amount(v: str) -> float | None:
         if not v:
-            return 0.0
+            return None
         try:
             return float(Decimal(v))
         except (InvalidOperation, ValueError):
-            return 0.0
+            return None
 
     # ========== Shared dynamic currency row utilities ==========
     def selected_currencies(rows):
@@ -43,7 +46,6 @@ def accounts_page(page: ft.Page):
         return [c for c in ALL_CURRENCIES if c not in picked]
 
     def rebuild_currency_dropdown_options(rows, column):
-        # Only rebuild if mounted
         if not column.page:
             return
         for r in rows:
@@ -52,7 +54,8 @@ def accounts_page(page: ft.Page):
             if keep and keep not in opts:
                 opts.append(keep)
             r["currency"].options = [ft.dropdown.Option(c) for c in sorted(opts)]
-        column.update()
+        if column.page:
+            column.update()
 
     # Generic add/remove helpers
     def add_currency_row(
@@ -61,6 +64,7 @@ def accounts_page(page: ft.Page):
         *,
         initial_currency=None,
         initial_amount="0.00",
+        initial_threshold: str | float | None = None,
         trigger_update=True,
     ):
         dd = ft.Dropdown(
@@ -79,6 +83,19 @@ def accounts_page(page: ft.Page):
             keyboard_type="number",
         )
 
+        thresh_val = (
+            f"{initial_threshold:.2f}"
+            if isinstance(initial_threshold, (float, int))
+            else (initial_threshold or "")
+        )
+        thresh = ft.TextField(
+            label="Alert <",
+            width=100,
+            value=thresh_val,
+            keyboard_type="number",
+            tooltip="Set low balance alert (e.g., 100)",
+        )
+
         container_ref = ft.Ref[ft.Container]()
 
         def on_change_currency(e):
@@ -90,7 +107,8 @@ def accounts_page(page: ft.Page):
             for entry in list(rows):
                 if entry["container"] is container_ref.current:
                     rows.remove(entry)
-            column.controls.remove(container_ref.current)
+            if container_ref.current in column.controls:
+                column.controls.remove(container_ref.current)
             rebuild_currency_dropdown_options(rows, column)
 
         remove_btn = ft.IconButton(
@@ -107,17 +125,18 @@ def accounts_page(page: ft.Page):
 
         c = ft.Container(
             ref=container_ref,
-            content=ft.Row([dd, amt, remove_btn], spacing=10),
+            content=ft.Row([dd, amt, thresh, remove_btn], spacing=10),
             padding=ft.padding.symmetric(horizontal=10, vertical=8),
             border=ft.border.all(1, BORDER),
             border_radius=10,
             bgcolor=ft.Colors.WHITE,
         )
 
-        rows.append({"currency": dd, "amount": amt, "container": c})
+        rows.append(
+            {"currency": dd, "amount": amt, "threshold": thresh, "container": c}
+        )
         column.controls.append(c)
 
-        # Only rebuild/update if already attached to page (avoids assertion)
         if trigger_update and column.page:
             rebuild_currency_dropdown_options(rows, column)
 
@@ -133,7 +152,6 @@ def accounts_page(page: ft.Page):
     add_currency_rows = []
     add_currency_column = ft.Column(spacing=10, width=540)
 
-    # initial row without update
     add_currency_row(add_currency_rows, add_currency_column, trigger_update=False)
 
     def clear_add_form():
@@ -143,7 +161,8 @@ def accounts_page(page: ft.Page):
         add_currency_rows.clear()
         add_currency_column.controls.clear()
         add_currency_row(add_currency_rows, add_currency_column, trigger_update=False)
-        page.update()
+        if page:
+            page.update()
 
     def add_account_ui(e):
         if not name_field.value.strip():
@@ -158,8 +177,13 @@ def accounts_page(page: ft.Page):
             ccy = row["currency"].value
             if not ccy:
                 continue
-            amt = parse_amount(row["amount"].value)
+            amt = parse_amount(row["amount"].value) or 0.0
             add_account_balance(acc_id, ccy, amt)
+
+            threshold = parse_amount(row["threshold"].value)
+            if threshold is not None:
+                set_account_balance_threshold(acc_id, ccy, threshold)
+
         refresh_accounts()
         clear_add_form()
         snack("Account added!", SUCCESS)
@@ -206,6 +230,7 @@ def accounts_page(page: ft.Page):
                     edit_currency_column,
                     initial_currency=b["currency"],
                     initial_amount=f"{b['balance']:.2f}",
+                    initial_threshold=b.get("balance_threshold"),
                 )
         else:
             add_currency_row(edit_currency_rows, edit_currency_column)
@@ -217,18 +242,48 @@ def accounts_page(page: ft.Page):
         if not edit_name_field.value.strip():
             snack("Name required", WARNING)
             return
+
+        acc_id = edit_account_id[0]
         update_account(
-            edit_account_id[0],
+            acc_id,
             name=edit_name_field.value.strip(),
             type=edit_type_field.value or "Cash",
             notes=edit_notes_field.value.strip(),
         )
+
+        current_balances_in_db = get_account_balances(acc_id)
+        currencies_in_ui = set()
+
         for row in edit_currency_rows:
             ccy = row["currency"].value
             if not ccy:
                 continue
-            amt = parse_amount(row["amount"].value)
-            add_account_balance(edit_account_id[0], ccy, amt)
+
+            currencies_in_ui.add(ccy)
+            amt = parse_amount(row["amount"].value) or 0.0
+            threshold = parse_amount(row["threshold"].value)
+
+            # Check if this is an existing balance
+            existing = next(
+                (b for b in current_balances_in_db if b["currency"] == ccy), None
+            )
+
+            if existing:
+                # Update existing balance
+                delta = amt - existing["balance"]
+                if delta != 0:
+                    add_account_balance(
+                        acc_id, ccy, delta
+                    )
+            else:
+                add_account_balance(acc_id, ccy, amt)
+
+            set_account_balance_threshold(acc_id, ccy, threshold)
+
+        for b in current_balances_in_db:
+            if b["currency"] not in currencies_in_ui:
+                delete_account_balance(acc_id, b["currency"])
+
         edit_dialog.open = False
         refresh_accounts()
         snack("Account updated", SUCCESS)
@@ -279,7 +334,7 @@ def accounts_page(page: ft.Page):
     )
     page.overlay.append(edit_dialog)
 
-    # ========== Transfer Dialog (unchanged conceptually, minor styling) ==========
+    # ========== Transfer Dialog (unchanged) ==========
     transfer_dialog = ft.AlertDialog(modal=True)
     transfer_from = ft.Dropdown(label="From", width=250)
     transfer_to = ft.Dropdown(label="To", width=250)
@@ -311,12 +366,15 @@ def accounts_page(page: ft.Page):
         if transfer_from.value == transfer_to.value:
             snack("Choose different accounts", WARNING)
             return
-        amt = parse_amount(transfer_amt.value)
-        if amt <= 0:
+
+        # Use the float-safe parser
+        amt_val = parse_amount(transfer_amt.value)
+        if amt_val is None or amt_val <= 0:
             snack("Amount must be > 0", WARNING)
             return
-        add_account_balance(int(transfer_from.value), transfer_ccy.value, -amt)
-        add_account_balance(int(transfer_to.value), transfer_ccy.value, amt)
+
+        add_account_balance(int(transfer_from.value), transfer_ccy.value, -amt_val)
+        add_account_balance(int(transfer_to.value), transfer_ccy.value, amt_val)
         transfer_dialog.open = False
         refresh_accounts()
         snack("Transfer complete", SUCCESS)
@@ -359,10 +417,31 @@ def accounts_page(page: ft.Page):
     accounts_column = ft.Column(spacing=16, width=900)
 
     def build_card(acc):
-        balances = (
-            ", ".join(f"{b['currency']}: {b['balance']:.2f}" for b in acc.balances)
-            or "No balances"
-        )
+        balance_items = []
+        for b in acc.balances:
+            bal_str = f"{b['currency']}: {b['balance']:.2f}"
+            thresh = b.get("balance_threshold")
+            if thresh is not None:
+                is_below = b["balance"] < thresh
+                bal_str += f" (Alert < {thresh:.2f})"
+                balance_items.append(
+                    ft.Text(
+                        bal_str,
+                        size=12,
+                        color=DANGER if is_below else ft.Colors.GREY_700,
+                        weight=ft.FontWeight.BOLD if is_below else ft.FontWeight.NORMAL,
+                    )
+                )
+            else:
+                balance_items.append(
+                    ft.Text(bal_str, size=12, color=ft.Colors.GREY_700)
+                )
+
+        if not balance_items:
+            balance_items.append(
+                ft.Text("No balances", size=12, color=ft.Colors.GREY_600)
+            )
+
         return ft.Container(
             ft.Row(
                 [
@@ -373,15 +452,20 @@ def accounts_page(page: ft.Page):
                                 f"Type: {acc.type}", size=12, color=ft.Colors.GREY_600
                             ),
                             ft.Text(
-                                f"Balances: {balances}",
+                                f"Balances:",
                                 size=12,
                                 color=ft.Colors.GREY_700,
+                                weight=ft.FontWeight.W_500,
                             ),
-                            ft.Text(
-                                f"Notes: {acc.notes or '-'}",
-                                size=11,
-                                color=ft.Colors.GREY_600,
-                                italic=True,
+                            ft.Column(balance_items, spacing=2),
+                            ft.Container(
+                                ft.Text(
+                                    f"Notes: {acc.notes or '-'}",
+                                    size=11,
+                                    color=ft.Colors.GREY_600,
+                                    italic=True,
+                                ),
+                                margin=ft.margin.only(top=5),
                             ),
                         ],
                         spacing=3,
