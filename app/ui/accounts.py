@@ -10,7 +10,7 @@ from app.db.accounts import (
     get_account_balances,
     delete_account_balance,
 )
-from app.services.converter import ALL_CURRENCIES
+from app.services.converter import get_active_currency_codes
 
 ACCOUNT_TYPES = ["Cash", "Bank", "Credit Card"]
 
@@ -42,7 +42,8 @@ def accounts_page(page: ft.Page):
         picked = set(selected_currencies(rows))
         if keep:
             picked.discard(keep)
-        return [c for c in ALL_CURRENCIES if c not in picked]
+        all_active_codes = get_active_currency_codes()
+        return [c for c in all_active_codes if c not in picked]
 
     def rebuild_currency_dropdown_options(rows, column):
         if not column.page:
@@ -65,14 +66,12 @@ def accounts_page(page: ft.Page):
         initial_threshold: str | float | None = None,
         trigger_update=True,
     ):
+        current_available = available_currencies(rows, keep=initial_currency)
         dd = ft.Dropdown(
             label="Currency",
             width=130,
             value=initial_currency,
-            options=[
-                ft.dropdown.Option(c)
-                for c in sorted(available_currencies(rows, keep=initial_currency))
-            ],
+            options=[ft.dropdown.Option(c) for c in sorted(current_available)],
         )
         amt = ft.TextField(
             label="Amount",
@@ -332,14 +331,22 @@ def accounts_page(page: ft.Page):
     transfer_dialog = ft.AlertDialog(modal=True)
     transfer_from = ft.Dropdown(label="From", width=250)
     transfer_to = ft.Dropdown(label="To", width=250)
-    transfer_ccy = ft.Dropdown(label="Currency", width=140)
+    transfer_ccy = ft.Dropdown(
+        label="Currency",
+        width=140,
+        options=[
+            ft.dropdown.Option(c) for c in get_active_currency_codes()
+        ],
+    )
     transfer_amt = ft.TextField(label="Amount", width=140, keyboard_type="number")
 
     def open_transfer(e=None):
         accts = get_accounts()
         transfer_from.options = [ft.dropdown.Option(str(a.id), a.name) for a in accts]
         transfer_to.options = [ft.dropdown.Option(str(a.id), a.name) for a in accts]
-        transfer_ccy.options = [ft.dropdown.Option(c) for c in ALL_CURRENCIES]
+        transfer_ccy.options = [
+            ft.dropdown.Option(c) for c in get_active_currency_codes()
+        ]
         transfer_from.value = None
         transfer_to.value = None
         transfer_ccy.value = None
@@ -445,7 +452,7 @@ def accounts_page(page: ft.Page):
                                 f"Type: {acc.type}", size=12, color=ft.Colors.GREY_600
                             ),
                             ft.Text(
-                                f"Balances:",
+                                "Balances:",
                                 size=12,
                                 color=ft.Colors.GREY_700,
                                 weight=ft.FontWeight.W_500,

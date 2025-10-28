@@ -8,9 +8,18 @@ from decimal import Decimal, InvalidOperation
 from app.utils.backup import backup_db, restore_db
 from app.db.connection import DB_PATH
 from app.db import settings as db_settings
-from app.services.converter import ALL_CURRENCIES, get_currency_symbol
+from app.services.converter import (
+    get_active_currency_codes,
+    get_currency_symbol,
+    clear_caches as clear_converter_caches,
+)
 from app.services.api import fetch_latest_rates
 from app.utils.recalculate import recalculate_all_conversions
+
+WARN_COLOR = ft.Colors.ORANGE_400
+ERROR_COLOR = ft.Colors.RED_400
+SUCCESS_COLOR = ft.Colors.GREEN_400
+INFO_COLOR = ft.Colors.BLUE_400
 
 
 def _default_backup_name() -> str:
@@ -18,9 +27,175 @@ def _default_backup_name() -> str:
     return f"./backups/finet-backup-{ts}.db"
 
 
+def _refresh_all_currency_ui(page: ft.Page):
+    """Clears caches and triggers updates for relevant controls."""
+    clear_converter_caches()
+    for ctrl in page.controls:
+        pass
+    page.update()
+
+
+# ========== Currency Management UI ==========
+def build_manage_currencies_card(page: ft.Page) -> ft.Control:
+    def snack(msg: str, color=SUCCESS_COLOR, duration=3000):
+        if not page:
+            return
+        sb = ft.SnackBar(ft.Text(msg), bgcolor=color, duration=duration)
+        page.snack_bar = sb
+        sb.open = True
+        page.update()
+
+    active_currencies_list = ft.ListView(spacing=5, expand=False, height=250)
+    add_code_field = ft.TextField(
+        label="Code (e.g., PLN)",
+        width=120,
+        max_length=3,
+        capitalization=ft.TextCapitalization.CHARACTERS,
+    )
+    add_name_field = ft.TextField(label="Name (e.g., Polish Złoty)", width=250)
+    add_symbol_field = ft.TextField(label="Symbol (e.g., zł)", width=100)
+    add_feedback = ft.Text("", size=11, color=ERROR_COLOR)
+
+    def load_active_currencies():
+        active_currencies_list.controls.clear()
+        try:
+            currencies = db_settings.get_active_currencies()
+            base_code = db_settings.get_base_currency()
+            for c in currencies:
+                is_base = c["code"] == base_code
+                active_currencies_list.controls.append(
+                    ft.Row(
+                        [
+                            ft.Text(
+                                f"{c['code']} ({c.get('symbol') or ''})",
+                                weight=ft.FontWeight.BOLD,
+                                width=100,
+                            ),
+                            ft.Text(
+                                c["name"],
+                                expand=True,
+                                tooltip=c["name"],
+                                no_wrap=True,
+                                overflow=ft.TextOverflow.ELLIPSIS,
+                            ),
+                            ft.IconButton(
+                                icon=ft.Icons.DELETE_OUTLINE,
+                                tooltip="Delete Currency"
+                                if not is_base
+                                else "Cannot delete base currency",
+                                icon_color=ft.Colors.RED_400
+                                if not is_base
+                                else ft.Colors.GREY_400,
+                                disabled=is_base,
+                                data=c["code"],
+                                on_click=on_delete_currency_click,
+                                icon_size=18,
+                            ),
+                        ],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    )
+                )
+        except Exception as e:
+            active_currencies_list.controls.append(
+                ft.Text(f"Error loading currencies: {e}", color=ERROR_COLOR)
+            )
+        if active_currencies_list.page:
+            active_currencies_list.update()
+
+    def on_add_currency_click(e):
+        code = add_code_field.value.strip().upper()
+        name = add_name_field.value.strip()
+        symbol = add_symbol_field.value.strip() or None
+
+        add_feedback.value = ""
+
+        if not code or not name:
+            add_feedback.value = "Code and Name are required."
+            add_feedback.update()
+            return
+        if len(code) > 3:
+            add_feedback.value = "Code should be max 3 letters."
+            add_feedback.update()
+            return
+
+        try:
+            db_settings.add_currency(code, name, symbol)
+            snack(f"Currency '{code}' added.")
+            add_code_field.value = ""
+            add_name_field.value = ""
+            add_symbol_field.value = ""
+            clear_converter_caches()
+            load_active_currencies()
+            _refresh_all_currency_ui(page)
+        except ValueError as ve:
+            add_feedback.value = str(ve)
+            add_feedback.update()
+        except Exception as ex:
+            snack(f"Error adding currency: {ex}", ERROR_COLOR)
+        finally:
+            add_code_field.update()
+            add_name_field.update()
+            add_symbol_field.update()
+
+    def on_delete_currency_click(e):
+        code_to_delete = e.control.data
+        try:
+            db_settings.delete_currency(code_to_delete)
+            snack(f"Currency '{code_to_delete}' deleted.")
+            clear_converter_caches()
+            load_active_currencies()
+            _refresh_all_currency_ui(page)
+        except ValueError as ve:
+            snack(str(ve), WARN_COLOR, duration=5000)
+        except Exception as ex:
+            snack(f"Error deleting currency: {ex}", ERROR_COLOR)
+
+    load_active_currencies()
+
+    add_button = ft.ElevatedButton(
+        "Add Currency", icon=ft.Icons.ADD, on_click=on_add_currency_click
+    )
+
+    return ft.Container(
+        ft.Column(
+            [
+                ft.Text("Manage Currencies", size=16, weight=ft.FontWeight.BOLD),
+                ft.Text(
+                    "Add or remove currencies available in the app.",
+                    size=12,
+                    color=ft.Colors.GREY_600,
+                ),
+                ft.Divider(),
+                ft.Text("Active Currencies:", weight=ft.FontWeight.W_500),
+                ft.Container(
+                    active_currencies_list,
+                    border=ft.border.all(1, ft.Colors.GREY_300),
+                    border_radius=5,
+                    padding=10,
+                ),
+                ft.Divider(),
+                ft.Text("Add New Currency:", weight=ft.FontWeight.W_500),
+                ft.Row([add_code_field, add_name_field, add_symbol_field], wrap=True),
+                add_feedback,
+                ft.Row([add_button], alignment=ft.MainAxisAlignment.END),
+            ],
+            spacing=12,
+        ),
+        padding=ft.padding.all(18),
+        bgcolor=ft.Colors.WHITE,
+        border_radius=14,
+        shadow=ft.BoxShadow(
+            spread_radius=1,
+            blur_radius=12,
+            color=ft.Colors.GREY_100,
+            offset=ft.Offset(0, 6),
+        ),
+    )
+
+
 # ========== Currency Settings UI ==========
 def build_currency_settings_card(page: ft.Page) -> ft.Control:
-    def snack(msg: str, color=ft.Colors.GREEN_400, duration=3000):
+    def snack(msg: str, color=SUCCESS_COLOR, duration=3000):
         if not page:
             return
         sb = ft.SnackBar(ft.Text(msg), bgcolor=color, duration=duration)
@@ -31,21 +206,19 @@ def build_currency_settings_card(page: ft.Page) -> ft.Control:
     try:
         current_base = db_settings.get_base_currency()
         all_rates = db_settings.get_exchange_rates()
+        active_codes = get_active_currency_codes()
     except Exception as e:
         return ft.Container(
-            ft.Text(f"Error loading currency settings: {e}", color=ft.Colors.RED_400),
+            ft.Text(f"Error loading currency settings: {e}", color=ERROR_COLOR),
             padding=20,
         )
-
     progress_ring = ft.ProgressRing(visible=False, width=16, height=16)
-
     base_currency_dd = ft.Dropdown(
-        label="Base Currency for Analytics",
+        label="Base Currency",
         value=current_base,
-        options=[ft.dropdown.Option(c) for c in ALL_CURRENCIES],
+        options=[ft.dropdown.Option(c) for c in active_codes],
         width=300,
     )
-
     rate_fields = {}
     rates_column = ft.Column(spacing=8)
 
@@ -53,7 +226,8 @@ def build_currency_settings_card(page: ft.Page) -> ft.Control:
         rates_column.controls.clear()
         rate_fields.clear()
         base_sym = get_currency_symbol(base_code)
-        for code in ALL_CURRENCIES:
+        refreshed_active_codes = get_active_currency_codes()
+        for code in refreshed_active_codes:
             if code == base_code:
                 continue
             rate = all_rates.get(code, 1.0)
@@ -85,26 +259,20 @@ def build_currency_settings_card(page: ft.Page) -> ft.Control:
                 try:
                     new_rates[code] = float(Decimal(field.value))
                 except (InvalidOperation, ValueError):
-                    snack(f"Invalid rate for {code}, skipping.", ft.Colors.RED_400)
+                    snack(f"Invalid rate: {code}", ERROR_COLOR)
                     return
-            new_rates[new_base] = 1.0
             db_settings.set_exchange_rates(new_rates)
-            from app.services import converter
-
-            converter.get_base_currency.cache_clear()
-            converter.get_conversion_rates.cache_clear()
-            snack("Currency settings saved!")
+            clear_converter_caches()
+            snack("Currency rates saved!")
+            _refresh_all_currency_ui(page)
         except Exception as ex:
-            snack(f"Error saving: {ex}", ft.Colors.RED_400)
+            snack(f"Error saving rates: {ex}", ERROR_COLOR)
 
     def _fetch_rates_worker():
         base = base_currency_dd.value
-
         progress_ring.visible = True
         page.update()
-
         fetched = fetch_latest_rates(base)
-
         if fetched:
             for code, field in rate_fields.items():
                 if code in fetched:
@@ -113,8 +281,7 @@ def build_currency_settings_card(page: ft.Page) -> ft.Control:
             rates_column.update()
             snack(f"Fetched latest rates for {base}.")
         else:
-            snack(f"Failed to fetch rates.", ft.Colors.RED_400)
-
+            snack("Failed to fetch rates.", ERROR_COLOR)
         progress_ring.visible = False
         page.update()
 
@@ -124,32 +291,23 @@ def build_currency_settings_card(page: ft.Page) -> ft.Control:
     def _recalculate_worker():
         progress_ring.visible = True
         page.update()
-        snack(
-            "Recalculating all historical data... This may take a moment.",
-            ft.Colors.BLUE_400,
-            duration=5000,
-        )
-
+        snack("Recalculating historical data...", INFO_COLOR, duration=5000)
         try:
             tx_count, rec_count = recalculate_all_conversions()
-            snack(
-                f"Recalculated {tx_count} transactions and {rec_count} recurring items."
-            )
+            snack(f"Recalculated {tx_count} transactions and {rec_count} items.")
         except Exception as ex:
-            snack(f"Error recalculating: {ex}", ft.Colors.RED_400, duration=5000)
+            snack(f"Error recalculating: {ex}", ERROR_COLOR, duration=5000)
         finally:
             progress_ring.visible = False
             page.update()
 
     def on_recalculate(e):
         save_rates(e)
-        threading.Thread(target=_recalculate_worker, daemon=True).start()
+
+    threading.Thread(target=_recalculate_worker, daemon=True).start()
 
     save_btn = ft.ElevatedButton(
-        "Save Rates",
-        icon=ft.Icons.SAVE,
-        on_click=save_rates,
-        bgcolor=ft.Colors.BLUE_400,
+        "Save Rates", icon=ft.Icons.SAVE, on_click=save_rates, bgcolor=INFO_COLOR
     )
     fetch_btn = ft.OutlinedButton(
         "Fetch Latest",
@@ -210,7 +368,7 @@ def build_currency_settings_card(page: ft.Page) -> ft.Control:
 
 
 def settings_page(page: ft.Page) -> ft.Control:
-    progress = ft.ProgressRing(visible=False)
+    progress_backup = ft.ProgressRing(visible=False, width=16, height=16)
 
     backup_out = ft.TextField(
         label="Backup output path", value=_default_backup_name(), width=520
@@ -288,31 +446,21 @@ def settings_page(page: ft.Page) -> ft.Control:
         return t
 
     def _create_backup_worker(db_path: str, out_path: str, passph: str | None):
-        log_path = os.path.join("app", "utils", "backup-debug.log")
         try:
-            progress.visible = True
+            progress_backup.visible = True
             page.update()
-
             backup_db(db_path, out_path, passphrase=passph, overwrite=True)
-            notify(f"Backup created: {out_path}", ft.Colors.BLUE_400)
+            notify(f"Backup created: {out_path}", INFO_COLOR)
         except Exception as ex:
-            try:
-                with open(log_path, "a", encoding="utf-8") as lf:
-                    lf.write(
-                        f"\n[{datetime.datetime.now().isoformat()}] Backup exception:\n"
-                    )
-                    lf.write(traceback.format_exc())
-            except Exception:
-                pass
-            notify(f"Backup failed: {ex}", ft.Colors.RED_400)
+            notify(f"Backup failed: {ex}", ERROR_COLOR)
         finally:
-            progress.visible = False
+            progress_backup.visible = False
             page.update()
 
     def _restore_backup_worker(in_path: str, db_path: str, passph: str | None):
         log_path = os.path.join("app", "utils", "backup-debug.log")
         try:
-            progress.visible = True
+            progress_backup.visible = True
             page.update()
 
             restore_db(in_path, db_path, passphrase=passph, overwrite=True)
@@ -328,7 +476,7 @@ def settings_page(page: ft.Page) -> ft.Control:
                 pass
             notify(f"Restore failed: {ex}", ft.Colors.RED_400)
         finally:
-            progress.visible = False
+            progress_backup.visible = False
             page.update()
 
     def on_backup_click(e):
@@ -398,6 +546,7 @@ def settings_page(page: ft.Page) -> ft.Control:
         )
         browse_buttons = [browse_backup_btn, browse_restore_btn]
 
+    manage_currencies_card = build_manage_currencies_card(page)
     currency_card = build_currency_settings_card(page)
     backup_card = ft.Container(
         ft.Column(
@@ -405,7 +554,7 @@ def settings_page(page: ft.Page) -> ft.Control:
                 ft.Row(
                     [
                         ft.Text("Create Backup", size=16, weight=ft.FontWeight.BOLD),
-                        progress,
+                        progress_backup,
                     ],
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                 ),
@@ -453,7 +602,7 @@ def settings_page(page: ft.Page) -> ft.Control:
     )
 
     page_controls = ft.Column(
-        [currency_card, backup_card, restore_card],
+        [manage_currencies_card, currency_card, backup_card, restore_card],
         spacing=16,
         scroll="auto",
         expand=True,

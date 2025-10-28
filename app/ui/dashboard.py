@@ -86,11 +86,42 @@ TIMEFRAME_OPTIONS = [
 # ============================================================
 
 
-def fmt_number(val: float, decimals: int = 2):
+def fmt_number(
+    val: float,
+    decimals: int = 2,
+    with_symbol: bool = True,
+    currency_code: str | None = None,
+):
+    """
+    Formats a number.
+    - If with_symbol is True and currency_code is provided, uses that currency's symbol.
+    - If with_symbol is True and currency_code is None, uses the base currency symbol.
+    - If with_symbol is False, returns the number without any symbol.
+    """
     try:
-        return f"{val:,.{decimals}f}"
-    except Exception:
-        return "0.00"
+        abs_val = abs(val)
+        num_str = f"{abs_val:,.{decimals}f}"
+        sign = "-" if val < 0 else ""
+
+        if with_symbol:
+            code_to_use = currency_code if currency_code else get_base_currency()
+            symbol = get_currency_symbol(code_to_use)
+            return f"{sign}{symbol} {num_str}"
+        else:
+            return f"{sign}{num_str}"
+
+    except Exception as e:
+        print(f"Error formatting number {val} with code {currency_code}: {e}")
+        fallback_num = "0.00"
+        if with_symbol:
+            try:
+                code_to_use = currency_code if currency_code else get_base_currency()
+                symbol = get_currency_symbol(code_to_use)
+                return f"{symbol} {fallback_num}"
+            except Exception:
+                return fallback_num
+        else:
+            return fallback_num
 
 
 def month_key(date_str: str) -> str:
@@ -217,25 +248,31 @@ def build_kpi_row(txs: list[dict]) -> ft.Control:
         unique_days = {t["date"] for t in txs}
         avg_daily = total_expense / max(1, len(unique_days))
 
+    transaction_count = len(txs)
+
     metrics = [
         ("Income", total_income, THEME.POSITIVE),
         ("Expense", total_expense, THEME.NEGATIVE),
         ("Net", net, THEME.POSITIVE if net >= 0 else THEME.NEGATIVE),
         ("Avg Daily Spend", avg_daily, THEME.WARNING),
-        ("Transactions", len(txs), THEME.PURPLE),
+        ("Transactions", transaction_count, THEME.PURPLE),
     ]
 
     chips = []
     for label, value, color in metrics:
+        is_tx_count = label == "Transactions"
+        if is_tx_count:
+            display_value = f"{int(value)}"
+        else:
+            display_value = fmt_number(value)
+
         chips.append(
             ft.Container(
                 ft.Column(
                     [
                         ft.Text(label, size=11, color=THEME.TEXT_MUTED),
                         ft.Text(
-                            fmt_number(value)
-                            if isinstance(value, (int, float))
-                            else str(value),
+                            display_value,
                             size=20,
                             weight=ft.FontWeight.W_700,
                             color=color,
@@ -333,9 +370,11 @@ def build_accounts_section(accounts) -> ft.Control:
         balances = ft.Column(
             [
                 ft.Text(
-                    f"{b['currency']}: {fmt_number(float(b['balance']))}",
+                    f"{fmt_number(float(b['balance']), currency_code=b['currency'])}",
                     size=12,
-                    color=color if float(b["balance"]) >= 0 else THEME.NEGATIVE,
+                    color=THEME.POSITIVE
+                    if float(b["balance"]) >= 0
+                    else THEME.NEGATIVE,
                     weight=ft.FontWeight.W_600,
                 )
                 for b in acc.balances
@@ -855,7 +894,7 @@ def build_recent_transactions(limit=8) -> ft.Control:
                     [
                         ft.Text(r.date, width=90, size=11, color=THEME.TEXT_MUTED),
                         ft.Text(
-                            f"{fmt_number(abs(r.amount))} {r.currency}",
+                            f"{fmt_number(abs(r.amount), currency_code=r.currency)}",
                             width=130,
                             size=12,
                             weight=ft.FontWeight.W_600,

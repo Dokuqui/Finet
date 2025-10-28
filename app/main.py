@@ -1,10 +1,16 @@
 import flet as ft
 from app.startup import initialize
 from app.ui.dashboard import dashboard_page
-from app.ui.settings import settings_page
-from app.ui.transactions import transactions_page
+
+from app.ui.transactions import (
+    transactions_page,
+    _handle_file_picker_result,
+    export_to_csv,
+    import_from_csv,
+)
 from app.ui.accounts import accounts_page
 from app.ui.budgets import budgets_page
+from app.ui.settings import settings_page
 
 
 def main(page: ft.Page):
@@ -12,9 +18,22 @@ def main(page: ft.Page):
     page.title = "Finet - Personal Finance Tracker"
     page.bgcolor = ft.Colors.GREY_50
 
-    tab_contents = [
+    file_picker = ft.FilePicker()
+    page.overlay.append(file_picker)
+
+    def notify_main(msg: str, color=ft.Colors.BLUE_400, duration=3000):
+        sb = ft.SnackBar(ft.Text(msg), bgcolor=color, duration=duration)
+        page.snack_bar = sb
+        sb.open = True
+        page.update()
+
+    file_picker.on_result = lambda e: _handle_file_picker_result(
+        e, page, notify_main, export_to_csv, import_from_csv
+    )
+
+    tab_content_generators = [
         dashboard_page,
-        transactions_page,
+        lambda p: transactions_page(p, file_picker),
         accounts_page,
         budgets_page,
         settings_page,
@@ -22,17 +41,18 @@ def main(page: ft.Page):
 
     def on_tab_change(e):
         idx = tabs.selected_index
-        tabs.tabs[idx].content = tab_contents[idx](page)
+        if tabs.tabs[idx].content is None:
+            tabs.tabs[idx].content = tab_content_generators[idx](page)
         page.update()
 
     tabs = ft.Tabs(
         selected_index=0,
         tabs=[
-            ft.Tab(text="Dashboard", content=dashboard_page(page)),
-            ft.Tab(text="Transactions", content=transactions_page(page)),
-            ft.Tab(text="Accounts", content=accounts_page(page)),
-            ft.Tab(text="Budgets", content=budgets_page(page)),
-            ft.Tab(text="Settings", content=settings_page(page)),
+            ft.Tab(text="Dashboard"),
+            ft.Tab(text="Transactions", content=None),
+            ft.Tab(text="Accounts", content=None),
+            ft.Tab(text="Budgets", content=None),
+            ft.Tab(text="Settings", content=None),
         ],
         indicator_color=ft.Colors.BLUE_400,
         label_color=ft.Colors.GREY_900,
@@ -41,6 +61,8 @@ def main(page: ft.Page):
         expand=True,
         on_change=on_tab_change,
     )
+
+    tabs.tabs[0].content = tab_content_generators[0](page)
 
     header = ft.Container(
         ft.Text(
