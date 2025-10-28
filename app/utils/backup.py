@@ -35,7 +35,6 @@ def backup_db(
         )
 
     if passphrase:
-        # write a temp copy and encrypt that into out_path
         with tempfile.NamedTemporaryFile(delete=False) as tf:
             tmp_path = tf.name
         try:
@@ -65,7 +64,6 @@ def restore_db(
         )
 
     if passphrase:
-        # decrypt into a temporary file then move into place
         with tempfile.NamedTemporaryFile(delete=False) as tf:
             tmp_path = tf.name
         try:
@@ -78,13 +76,11 @@ def restore_db(
                 except Exception:
                     pass
     else:
-        # If input is encrypted but passphrase is not supplied, try to detect and error
         if is_encrypted_file(in_path):
             raise ValueError("Input appears encrypted but no passphrase provided.")
         shutil.copy2(in_path, db_path)
 
 
-# CLI
 def _cli():
     parser = argparse.ArgumentParser(
         prog="finet-backup", description="Backup / restore Finet DB"

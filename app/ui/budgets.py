@@ -5,7 +5,6 @@ from app.db.budgets import get_budgets, add_budget, update_budget, delete_budget
 from app.db.transactions import get_category_spend
 
 
-# Design Tokens / Theme Layer
 class UX:
     BG = ft.Colors.GREY_50
     SURFACE = ft.Colors.WHITE
@@ -98,7 +97,6 @@ def budgets_page(page: ft.Page):
     end_field = ft.TextField(label="End (YYYY-MM-DD)", width=150, visible=False)
     form_feedback = ft.Text("", color=UX.DANGER, size=12)
 
-    # Quick fill buttons
     def set_this_month(e):
         s, e_ = month_range(today())
         start_field.value = fmt(s)
@@ -341,7 +339,6 @@ def budgets_page(page: ft.Page):
             color=UX.MUTED,
         )
 
-        # Remaining is always against positive spent
         remaining = max(b["amount"] - spent_positive, 0)
 
         return ft.Container(
@@ -457,7 +454,6 @@ def budgets_page(page: ft.Page):
             raw_signed = get_category_spend(
                 b["category_id"], b["start_date"], b["end_date"]
             )
-            # Convert signed sum to positive magnitude for budget comparison
             spent_positive = abs(raw_signed)
             percent = spent_positive / b["amount"] if b["amount"] > 0 else 0
             if percent >= 1 and not overshoot_shown:
@@ -586,7 +582,6 @@ def budgets_page(page: ft.Page):
         margin=ft.margin.only(top=30, bottom=12),
     )
 
-    # Initial load
     update_form_visibility()
     refresh_budgets()
 

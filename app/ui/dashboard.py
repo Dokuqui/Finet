@@ -11,6 +11,11 @@ from app.db.transactions import (
 from app.db.accounts import get_accounts, get_low_balance_alerts
 from app.db.categories import get_categories
 from app.db.budgets import get_budgets
+from app.services.converter import (
+    convert_to_base,
+    get_base_currency,
+    get_currency_symbol,
+)
 from app.ui.transactions import get_icon_by_name
 
 # ============================================================
@@ -202,8 +207,10 @@ def Card(
 
 
 def build_kpi_row(txs: list[dict]) -> ft.Control:
-    total_income = sum(float(t["amount"]) for t in txs if float(t["amount"]) > 0)
-    total_expense = sum(abs(float(t["amount"])) for t in txs if float(t["amount"]) < 0)
+    total_income = sum(t["amount_converted"] for t in txs if t["amount_converted"] > 0)
+    total_expense = sum(
+        abs(t["amount_converted"]) for t in txs if t["amount_converted"] < 0
+    )
     net = total_income - total_expense
     avg_daily = 0.0
     if txs:
@@ -251,11 +258,43 @@ def build_kpi_row(txs: list[dict]) -> ft.Control:
 
 def build_accounts_section(accounts) -> ft.Control:
     currency_totals = defaultdict(float)
+    total_converted = 0.0
+
     for acc in accounts:
         for b in acc.balances:
-            currency_totals[b["currency"]] += float(b["balance"])
+            bal = float(b["balance"])
+            currency_totals[b["currency"]] += bal
+            total_converted += convert_to_base(bal, b["currency"])
 
     total_row = ft.Row(
+        [
+            ft.Container(
+                ft.Column(
+                    [
+                        ft.Text(
+                            "Total Portfolio Value", size=11, color=THEME.TEXT_MUTED
+                        ),
+                        ft.Text(
+                            fmt_number(total_converted),
+                            size=17,
+                            weight=ft.FontWeight.BOLD,
+                            color=THEME.POSITIVE
+                            if total_converted >= 0
+                            else THEME.NEGATIVE,
+                        ),
+                    ],
+                    spacing=2,
+                ),
+                padding=ft.padding.all(10),
+                bgcolor=ft.Colors.with_opacity(0.1, THEME.ACCENT),
+                border_radius=THEME.R_MD,
+                margin=ft.margin.only(right=8, bottom=8),
+            )
+        ],
+        alignment=ft.MainAxisAlignment.START,
+    )
+
+    currency_row = ft.Row(
         [
             ft.Row(
                 [
@@ -264,7 +303,7 @@ def build_accounts_section(accounts) -> ft.Control:
                             [
                                 ft.Text(cur, size=11, color=THEME.TEXT_MUTED),
                                 ft.Text(
-                                    fmt_number(amt),
+                                    fmt_number(amt, with_symbol=False),
                                     size=17,
                                     weight=ft.FontWeight.BOLD,
                                     color=THEME.POSITIVE
@@ -608,13 +647,13 @@ def build_daily_spend_sparkline(txs: list[dict], days: int = 14) -> ft.Control:
         except Exception:
             continue
         if start <= d <= today:
-            amt = float(t["amount"])
-            if amt < 0:
-                daily_exp[d] += abs(amt)
+            amt_conv = float(t["amount_converted"])
+            if amt_conv < 0:
+                daily_exp[d] += abs(amt_conv)
+
     ordered = [start + timedelta(days=i) for i in range(days)]
     vals = [daily_exp.get(d, 0.0) for d in ordered]
     max_val = max(vals) or 1
-
     width, height = 560, 140
     ml, mb, mt, mr = 8, 24, 14, 8
     pw = width - ml - mr
@@ -645,7 +684,6 @@ def build_daily_spend_sparkline(txs: list[dict], days: int = 14) -> ft.Control:
             )
         shapes.append(cv.Circle(x=x, y=y, radius=3, paint=ft.Paint(color=THEME.AMBER)))
         last = (x, y)
-
     shapes.append(
         cv.Line(
             x1=ml,
@@ -663,10 +701,8 @@ def build_daily_spend_sparkline(txs: list[dict], days: int = 14) -> ft.Control:
             ft.TextStyle(size=10, color=THEME.AMBER),
         )
     )
-
     total7 = sum(vals[-7:])
     avg7 = total7 / 7 if days >= 7 else total7 / max(1, len(vals))
-
     footer = ft.Row(
         [
             ft.Text(
@@ -695,6 +731,7 @@ def build_budget_chart(budgets: list[dict], cat_dict: dict[int, str]) -> ft.Cont
             empty_state("Budgets"), title="Budget Utilization", icon=ft.Icons.DATA_USAGE
         )
 
+    base_sym = get_currency_symbol(get_base_currency())
     spent_map = {}
     for b in budgets:
         spent_map[b["id"]] = get_category_spend(
@@ -708,7 +745,6 @@ def build_budget_chart(budgets: list[dict], cat_dict: dict[int, str]) -> ft.Cont
     width_full = 320
     top = 10
     alerts = []
-
     for idx, b in enumerate(budgets):
         spent = spent_map[b["id"]]
         amount = b["amount"] or 0
@@ -750,7 +786,7 @@ def build_budget_chart(budgets: list[dict], cat_dict: dict[int, str]) -> ft.Cont
             cv.Text(
                 bar_x + 10,
                 base_y + 4,
-                f"{fmt_number(spent, 0)}/{fmt_number(amount, 0)}",
+                f"{base_sym}{abs(spent):.0f} / {base_sym}{amount:.0f}",
                 ft.TextStyle(
                     size=11,
                     weight=ft.FontWeight.W_600,
@@ -771,10 +807,8 @@ def build_budget_chart(budgets: list[dict], cat_dict: dict[int, str]) -> ft.Cont
                 alerts.append(("Exceeded", b, color))
             elif pct >= 0.9:
                 alerts.append(("Near Limit", b, color))
-
     canvas_h = max(120, top + len(budgets) * (bar_h + gap))
     canvas = cv.Canvas(width=560, height=canvas_h, shapes=shapes)
-
     alert_controls = []
     for label, b, color in alerts:
         spent = spent_map[b["id"]]
@@ -791,7 +825,6 @@ def build_budget_chart(budgets: list[dict], cat_dict: dict[int, str]) -> ft.Cont
                 spacing=6,
             )
         )
-
     return Card(
         ft.Column([canvas] + alert_controls, spacing=12),
         title="Budget Utilization",
@@ -905,7 +938,6 @@ def build_upcoming_bills_card(days_ahead=30, limit=7) -> ft.Control:
 
         cat_type = item.get("category_type", "expense")
         amount = float(item["amount"])
-        # Use absolute amount for display, color-code by type
         amount_abs = abs(amount)
         amount_color = THEME.POSITIVE if cat_type == "income" else THEME.NEGATIVE
 
@@ -1037,6 +1069,7 @@ def build_low_balance_alerts_card() -> ft.Control | None:
         variant="accent",
     )
 
+
 # ============================================================
 # DASHBOARD CONTENT
 # ============================================================
@@ -1051,17 +1084,19 @@ def build_dashboard_content(timeframe_code: str) -> ft.Control:
 
     cat_amounts = defaultdict(float)
     for t in filtered:
-        cat_amounts[cat_map.get(t["category_id"], "Other")] += float(t["amount"])
+        cat_amounts[cat_map.get(t["category_id"], "Other")] += float(
+            t["amount_converted"]
+        )
 
     month_income = defaultdict(float)
     month_expense = defaultdict(float)
     for t in filtered:
         mk = month_key(t["date"])
-        amt = float(t["amount"])
-        if amt > 0:
-            month_income[mk] += amt
+        amt_conv = float(t["amount_converted"])
+        if amt_conv > 0:
+            month_income[mk] += amt_conv
         else:
-            month_expense[mk] += abs(amt)
+            month_expense[mk] += abs(amt_conv)
 
     income_series = sorted(month_income.items(), key=lambda x: x[0])
     expense_series = sorted(month_expense.items(), key=lambda x: x[0])
@@ -1076,25 +1111,20 @@ def build_dashboard_content(timeframe_code: str) -> ft.Control:
     sparkline = build_daily_spend_sparkline(filtered, 14)
     recent_section = build_recent_transactions()
     upcoming_bills_section = build_upcoming_bills_card(days_ahead=30, limit=7)
-    
-
     left_col_controls = [
         accounts_section,
         Card(kpi_row, title="Key Metrics", icon=ft.Icons.INSIGHTS),
         category_chart,
         budget_chart,
     ]
-    
     right_col_controls = [
         line_chart,
         sparkline,
         upcoming_bills_section,
         recent_section,
     ]
-
     if low_balance_card:
         right_col_controls.insert(0, low_balance_card)
-
     left_col = ft.Column(
         left_col_controls,
         spacing=24,
@@ -1131,8 +1161,16 @@ def dashboard_page(page: ft.Page):
         options=[ft.dropdown.Option(k, text=v) for k, v in TIMEFRAME_OPTIONS],
     )
 
-    content_container.content = build_dashboard_content(timeframe_dropdown.value)
+    def clear_caches():
+        """
+        Clears cached data to ensure UI reflects new settings if changed.
+        """
+        from app.services import converter
 
+        converter.get_base_currency.cache_clear()
+        converter.get_conversion_rates.cache_clear()
+
+    content_container.content = build_dashboard_content(timeframe_dropdown.value)
     timestamp_chip = ft.Container(
         ft.Text(
             f"Data as of {datetime.now().strftime('%Y-%m-%d %H:%M')}",
@@ -1180,6 +1218,8 @@ def dashboard_page(page: ft.Page):
         )
         content_container.update()
 
+        clear_caches()
+
         content_container.content = build_dashboard_content(timeframe_dropdown.value)
         update_timeframe_label()
         timestamp_chip.content = ft.Text(
@@ -1218,6 +1258,12 @@ def dashboard_page(page: ft.Page):
             content_container,
         ],
     )
+
+    def on_tab_visible():
+        clear_caches()
+        content_container.content = build_dashboard_content(timeframe_dropdown.value)
+        if content_container.page:
+            content_container.page.update()
 
     root = ft.Container(
         scroll_view,

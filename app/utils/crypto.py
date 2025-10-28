@@ -6,9 +6,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.backends import default_backend
 from cryptography.fernet import Fernet
 
-# Salt length in bytes
 SALT_SIZE = 16
-# PBKDF2 iterations (adjustable)
 KDF_ITERATIONS = 390_000
 
 

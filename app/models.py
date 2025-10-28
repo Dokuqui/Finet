@@ -22,6 +22,7 @@ class Transaction:
                 return r[key]
             except Exception:
                 return None
+
         return cls(
             id=_get(row, "id"),
             date=_get(row, "date"),

@@ -1,9 +1,9 @@
 import sqlite3
 import os
 import datetime
+from app.db.settings import DEFAULT_SETTINGS
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "finet.db")
-
 
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
@@ -28,6 +28,40 @@ def _column_exists(conn, table: str, column: str) -> bool:
     return any(row[1] == column for row in cur.fetchall())
 
 
+def _init_settings_table(conn):
+    """
+    Creates the settings tables if they don't exist.
+    (Moved from settings.py to break circular import)
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY NOT NULL,
+            value TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS exchange_rates (
+            currency TEXT PRIMARY KEY NOT NULL,
+            rate REAL NOT NULL
+        )
+    """)
+
+    cur = conn.execute("SELECT 1 FROM app_settings WHERE key='base_currency'")
+    if cur.fetchone() is None:
+        conn.execute(
+            "INSERT INTO app_settings (key, value) VALUES (?, ?)",
+            ("base_currency", DEFAULT_SETTINGS["base_currency"]),
+        )
+
+    cur = conn.execute("SELECT COUNT(*) FROM exchange_rates")
+    if cur.fetchone()[0] == 0:
+        rates = DEFAULT_SETTINGS["exchange_rates"].items()
+        conn.executemany(
+            "INSERT INTO exchange_rates (currency, rate) VALUES (?, ?)",
+            rates,
+        )
+
+
 def _create_base_tables(conn):
     # Accounts
     conn.execute("""
@@ -45,7 +79,7 @@ def _create_base_tables(conn):
             account_id INTEGER NOT NULL,
             currency TEXT NOT NULL,
             balance REAL DEFAULT 0,
-            balance_threshold REAL, -- ADDED: For low balance alerts
+            balance_threshold REAL,
             UNIQUE(account_id, currency),
             FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
         )
@@ -59,12 +93,13 @@ def _create_base_tables(conn):
             type TEXT NOT NULL DEFAULT 'expense'
         )
     """)
-    # Transactions (initial base schema)
+    # Transactions
     conn.execute("""
         CREATE TABLE IF NOT EXISTS transactions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             date TEXT NOT NULL,
             amount REAL NOT NULL,
+            amount_converted REAL NOT NULL DEFAULT 0,
             category_id INTEGER,
             account_id INTEGER,
             notes TEXT,
@@ -90,9 +125,6 @@ def _create_base_tables(conn):
 
 
 def _ensure_categories_type_column(conn):
-    """
-    Migration: Add the 'type' column to categories if it doesn't exist.
-    """
     if not _column_exists(conn, "categories", "type"):
         try:
             conn.execute(
@@ -103,13 +135,20 @@ def _ensure_categories_type_column(conn):
 
 
 def _ensure_balances_threshold_column(conn):
-    """
-    Migration: Add the 'balance_threshold' column to account_balances.
-    """
     if not _column_exists(conn, "account_balances", "balance_threshold"):
         try:
             conn.execute(
                 "ALTER TABLE account_balances ADD COLUMN balance_threshold REAL"
+            )
+        except sqlite3.OperationalError:
+            pass
+
+
+def _ensure_transactions_converted_column(conn):
+    if not _column_exists(conn, "transactions", "amount_converted"):
+        try:
+            conn.execute(
+                "ALTER TABLE transactions ADD COLUMN amount_converted REAL NOT NULL DEFAULT 0"
             )
         except sqlite3.OperationalError:
             pass
@@ -123,6 +162,7 @@ def _ensure_recurring_table(conn):
                 account_id INTEGER NOT NULL,
                 category_id INTEGER NOT NULL,
                 amount REAL NOT NULL,
+                amount_converted REAL NOT NULL DEFAULT 0,
                 currency TEXT NOT NULL,
                 frequency TEXT NOT NULL,
                 interval INTEGER,
@@ -140,7 +180,6 @@ def _ensure_recurring_table(conn):
                 FOREIGN KEY(category_id) REFERENCES categories(id) ON DELETE SET NULL
             )
         """)
-    # Indexes
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_recurring_active_next
         ON recurring_transactions(active, next_occurrence)
@@ -148,15 +187,13 @@ def _ensure_recurring_table(conn):
 
 
 def _ensure_recurring_columns(conn):
-    """
-    Defensive additions if early versions lacked columns.
-    """
     add_cols = {
         "next_occurrence": "TEXT",
         "last_generated_at": "TEXT",
         "active": "INTEGER NOT NULL DEFAULT 1",
         "created_at": "TEXT",
         "updated_at": "TEXT",
+        "amount_converted": "REAL NOT NULL DEFAULT 0",
     }
     for col, col_def in add_cols.items():
         if not _column_exists(conn, "recurring_transactions", col):
@@ -169,7 +206,6 @@ def _ensure_recurring_columns(conn):
 
 
 def _ensure_transactions_indexes(conn):
-    # Unique index preventing duplicate recurring occurrences
     conn.execute("""
         CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_recurring_unique
         ON transactions(recurring_id, occurrence_date)
@@ -184,8 +220,10 @@ def _ensure_transactions_indexes(conn):
 def init_db():
     conn = get_db_connection()
     _create_base_tables(conn)
+    _init_settings_table(conn)
     _ensure_categories_type_column(conn)
     _ensure_balances_threshold_column(conn)
+    _ensure_transactions_converted_column(conn)
     _ensure_recurring_table(conn)
     _ensure_recurring_columns(conn)
     _ensure_transactions_indexes(conn)
