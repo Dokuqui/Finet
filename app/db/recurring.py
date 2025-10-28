@@ -6,6 +6,7 @@ from .connection import get_db_connection
 from .transactions import add_transaction
 from app.db.accounts import increment_account_balance
 from app.db.categories import get_categories
+from app.services.converter import convert_to_base
 
 FREQUENCIES = {"daily", "weekly", "monthly", "yearly", "custom_interval", "once"}
 
@@ -58,6 +59,8 @@ def create_recurring(
     if frequency == "once":
         end_date = _fmt(start)
 
+    amount_converted = convert_to_base(amount, currency)
+
     now_iso = datetime.datetime.utcnow().isoformat()
 
     conn = get_db_connection()
@@ -65,7 +68,7 @@ def create_recurring(
     cur.execute(
         """
         INSERT INTO recurring_transactions
-        (account_id, category_id, amount, currency, frequency, interval,
+        (account_id, category_id, amount, amount_converted, currency, frequency, interval,
          day_of_month, weekday, start_date, end_date, next_occurrence,
          last_generated_at, notes, active, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -74,6 +77,7 @@ def create_recurring(
             account_id,
             category_id,
             amount,
+            amount_converted,
             currency,
             frequency,
             interval,
@@ -261,7 +265,6 @@ def generate_due_transactions(today: Optional[datetime.date] = None) -> int:
     if not recs:
         return 0
 
-    cat_map = _category_map()
     generated = 0
 
     for rec in recs:
@@ -281,7 +284,7 @@ def generate_due_transactions(today: Optional[datetime.date] = None) -> int:
             try:
                 add_transaction(
                     date=_fmt(next_occ),
-                    amount=rec["amount"],  # already signed
+                    amount=rec["amount"],
                     category_id=rec["category_id"],
                     account_id=rec["account_id"],
                     notes=rec.get("notes") or "",

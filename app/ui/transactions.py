@@ -444,7 +444,6 @@ def transactions_page(page: ft.Page):
     )
     page.overlay.append(edit_dialog)
 
-    # Category list dialog
     categories_grid = ft.Column(spacing=10, scroll="auto")
 
     list_dialog.content = ft.Container(
@@ -610,9 +609,9 @@ def transactions_page(page: ft.Page):
     def _toggle_recurring(e):
         show = recurring_switch.value
         frequency_field.visible = show
-        
+
         freq = frequency_field.value
-        end_date_field.visible = show and (freq != 'once')
+        end_date_field.visible = show and (freq != "once")
         interval_field.visible = show and (freq == "custom_interval")
         day_of_month_field.visible = show and (freq == "monthly")
         page.update()
@@ -621,7 +620,7 @@ def transactions_page(page: ft.Page):
         freq = frequency_field.value
         interval_field.visible = freq == "custom_interval"
         day_of_month_field.visible = freq == "monthly"
-        end_date_field.visible = freq != 'once' 
+        end_date_field.visible = freq != "once"
         page.update()
 
     recurring_switch.on_change = _toggle_recurring
@@ -650,7 +649,6 @@ def transactions_page(page: ft.Page):
         icon_name = getattr(tx, "category_icon", "Other")
         color = transaction_color(tx.amount)
         date_str = str(tx.date)[:10]
-        # Display absolute amount but color-coded by sign
         amount_text = f"{tx.currency} {abs(tx.amount):.2f}"
 
         badge = (
@@ -764,10 +762,6 @@ def transactions_page(page: ft.Page):
             transaction_list.update()
 
     # ---------- Add Transaction Logic ----------
-
-    # REMOVED: This is no longer needed
-    # INCOME_CATEGORIES = {"salary"}  # extend as needed
-
     def reset_form():
         amount_field.value = "0.00"
         notes_field.value = ""
@@ -817,7 +811,6 @@ def transactions_page(page: ft.Page):
         is_income = category_obj.get("type") == "income"
         signed_amount = raw_amt if is_income else -abs(raw_amt)
 
-        # Recurring branch
         if recurring_switch.value:
             freq = frequency_field.value
             if not freq:
@@ -852,7 +845,7 @@ def transactions_page(page: ft.Page):
             create_recurring(
                 account_id=account_id,
                 category_id=category_id,
-                amount=signed_amount,  # Pass the calculated signed amount
+                amount=signed_amount,
                 currency=currency,
                 frequency=freq,
                 start_date=date_iso,
@@ -872,10 +865,9 @@ def transactions_page(page: ft.Page):
             )
             return
 
-        # Normal single transaction
         add_transaction(
             date_iso,
-            signed_amount,  # Pass the calculated signed amount
+            signed_amount,
             category_id,
             account_id,
             notes_field.value.strip(),
@@ -956,7 +948,7 @@ def transactions_page(page: ft.Page):
                     if category:
                         cat_id = category["id"]
                     else:
-                        cat_id = other_cat_id  # Fallback
+                        cat_id = other_cat_id
                         skipped += 1
 
                     try:
@@ -1103,7 +1095,6 @@ def transactions_page(page: ft.Page):
         padding=ft.padding.only(bottom=40),
     )
 
-    # Initial population
     refresh_transactions()
     refresh_category_list()
     selected_date_display.value = selected_date_value[0]

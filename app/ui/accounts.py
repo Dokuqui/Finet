@@ -10,13 +10,12 @@ from app.db.accounts import (
     get_account_balances,
     delete_account_balance,
 )
+from app.services.converter import ALL_CURRENCIES
 
 ACCOUNT_TYPES = ["Cash", "Bank", "Credit Card"]
-ALL_CURRENCIES = ["USD", "EUR", "GBP", "JPY", "CHF", "CAD"]
 
 
 def accounts_page(page: ft.Page):
-    # ---------- Theme-ish helpers ----------
     ACCENT = ft.Colors.BLUE_400
     SUCCESS = ft.Colors.GREEN_400
     DANGER = ft.Colors.RED_400
@@ -42,7 +41,7 @@ def accounts_page(page: ft.Page):
     def available_currencies(rows, keep=None):
         picked = set(selected_currencies(rows))
         if keep:
-            picked.discard(keep)  # allow its own current value
+            picked.discard(keep)
         return [c for c in ALL_CURRENCIES if c not in picked]
 
     def rebuild_currency_dropdown_options(rows, column):
@@ -57,7 +56,6 @@ def accounts_page(page: ft.Page):
         if column.page:
             column.update()
 
-    # Generic add/remove helpers
     def add_currency_row(
         rows,
         column,
@@ -263,18 +261,14 @@ def accounts_page(page: ft.Page):
             amt = parse_amount(row["amount"].value) or 0.0
             threshold = parse_amount(row["threshold"].value)
 
-            # Check if this is an existing balance
             existing = next(
                 (b for b in current_balances_in_db if b["currency"] == ccy), None
             )
 
             if existing:
-                # Update existing balance
                 delta = amt - existing["balance"]
                 if delta != 0:
-                    add_account_balance(
-                        acc_id, ccy, delta
-                    )
+                    add_account_balance(acc_id, ccy, delta)
             else:
                 add_account_balance(acc_id, ccy, amt)
 
@@ -367,7 +361,6 @@ def accounts_page(page: ft.Page):
             snack("Choose different accounts", WARNING)
             return
 
-        # Use the float-safe parser
         amt_val = parse_amount(transfer_amt.value)
         if amt_val is None or amt_val <= 0:
             snack("Amount must be > 0", WARNING)
@@ -553,7 +546,6 @@ def accounts_page(page: ft.Page):
         if page:
             page.update()
 
-    # Initial load
     refresh_accounts()
 
     # ========== Layout ==========

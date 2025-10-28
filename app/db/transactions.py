@@ -1,5 +1,6 @@
 from .connection import get_db_connection
 from app.models import Transaction
+from app.services.converter import convert_to_base
 
 
 def add_transaction(
@@ -14,21 +15,25 @@ def add_transaction(
 ):
     """
     Stores a transaction with SIGNED amount:
-      - Income categories: positive amount
-      - Expense categories: negative amount
+    - Income categories: positive amount
+    - Expense categories: negative amount
 
-    Account balances are adjusted outside this function to keep it pure.
+    Also stores the amount converted to the base currency.
     """
+
+    amount_converted = convert_to_base(amount, currency)
+
     conn = get_db_connection()
     conn.execute(
         """
         INSERT INTO transactions
-          (date, amount, category_id, account_id, notes, currency, recurring_id, occurrence_date)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          (date, amount, amount_converted, category_id, account_id, notes, currency, recurring_id, occurrence_date)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             date,
             amount,
+            amount_converted,
             category_id,
             account_id,
             notes,
@@ -60,18 +65,13 @@ def get_recent_transactions(limit=10):
 
 
 def delete_transaction(transaction_id: int):
-    """
-    Deletes a transaction and reverses its balance impact.
-    Since amounts are signed, we just subtract the stored amount from balance
-    (equivalent to adding the negative).
-    """
     conn = get_db_connection()
     tx = conn.execute(
         "SELECT amount, account_id, currency FROM transactions WHERE id = ?",
         (transaction_id,),
     ).fetchone()
     if tx:
-        amount = tx["amount"]  # signed
+        amount = tx["amount"]
         account_id = tx["account_id"]
         currency = tx["currency"]
         conn.execute(
@@ -85,12 +85,12 @@ def delete_transaction(transaction_id: int):
 
 def get_category_spend(category_id, start_date, end_date):
     """
-    Returns net sum (signed) for category; callers decide how to interpret.
+    Returns net sum (signed) for category, using the pre-converted amounts.
     """
     conn = get_db_connection()
     row = conn.execute(
         """
-        SELECT SUM(amount) as total
+        SELECT SUM(amount_converted) as total
         FROM transactions
         WHERE category_id = ? AND date >= ? AND date <= ?
         """,
@@ -102,12 +102,12 @@ def get_category_spend(category_id, start_date, end_date):
 
 def get_transactions_for_analytics():
     """
-    Returns raw dict rows including signed amounts for analytics.
+    Returns dict rows including pre-converted amounts.
     """
     conn = get_db_connection()
     rows = conn.execute(
         """
-        SELECT id, date, amount, category_id, account_id, currency,
+        SELECT id, date, amount, amount_converted, category_id, account_id, currency,
                recurring_id, occurrence_date
         FROM transactions
         ORDER BY date ASC, id ASC
