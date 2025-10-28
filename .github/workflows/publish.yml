@@ -1,0 +1,59 @@
+name: Build and Publish Finet
+
+on:
+    push:
+        tags:
+            - "v*.*.*" # Trigger workflow when a tag like v1.0.0 is pushed
+
+jobs:
+    build-and-publish:
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            packages: write
+            # id-token: write
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.14"
+
+            - name: Install build dependencies
+              run: pip install build twine
+
+            - name: Build package
+              run: python -m build
+
+            # - name: Publish package to PyPI
+            #   # uses: pypa/gh-action-pypi-publish@release/v1
+            #   uses: pypa/gh-action-pypi-publish@trusted-publishers
+            #   with:
+            #     # password: ${{ secrets.PYPI_API_TOKEN }}
+
+            - name: Log in to GitHub Container Registry
+              uses: docker/login-action@v3
+              with:
+                  registry: ghcr.io
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Extract Docker metadata
+              id: meta
+              uses: docker/metadata-action@v5
+              with:
+                  images: ghcr.io/${{ github.repository }}
+                  tags: |
+                      type=semver,pattern={{version}}
+                      type=sha # Also tag with the commit SHA
+
+            - name: Build and push Docker image
+              uses: docker/build-push-action@v5
+              with:
+                  context: .
+                  push: true
+                  tags: ${{ steps.meta.outputs.tags }}
+                  labels: ${{ steps.meta.outputs.labels }}

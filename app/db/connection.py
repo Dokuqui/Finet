@@ -1,9 +1,10 @@
 import sqlite3
 import os
 import datetime
-from app.db.settings import DEFAULT_SETTINGS
+from app.services.currency_info import PREDEFINED_CURRENCIES
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "finet.db")
+
 
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
@@ -33,6 +34,8 @@ def _init_settings_table(conn):
     Creates the settings tables if they don't exist.
     (Moved from settings.py to break circular import)
     """
+    from app.db.settings import DEFAULT_SETTINGS
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS app_settings (
             key TEXT PRIMARY KEY NOT NULL,
@@ -45,6 +48,13 @@ def _init_settings_table(conn):
             rate REAL NOT NULL
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS currencies (
+            code TEXT PRIMARY KEY NOT NULL,
+            name TEXT NOT NULL,
+            symbol TEXT
+        )
+    """)
 
     cur = conn.execute("SELECT 1 FROM app_settings WHERE key='base_currency'")
     if cur.fetchone() is None:
@@ -53,13 +63,29 @@ def _init_settings_table(conn):
             ("base_currency", DEFAULT_SETTINGS["base_currency"]),
         )
 
-    cur = conn.execute("SELECT COUNT(*) FROM exchange_rates")
+    cur = conn.execute("SELECT COUNT(*) FROM currencies")
     if cur.fetchone()[0] == 0:
-        rates = DEFAULT_SETTINGS["exchange_rates"].items()
+        initial_currencies = [
+            (code, name, symbol) for code, name, symbol in PREDEFINED_CURRENCIES
+        ]
         conn.executemany(
-            "INSERT INTO exchange_rates (currency, rate) VALUES (?, ?)",
-            rates,
+            "INSERT INTO currencies (code, name, symbol) VALUES (?, ?, ?)",
+            initial_currencies,
         )
+
+        initial_rates = []
+        default_rates = DEFAULT_SETTINGS["exchange_rates"]
+        for code, name, symbol in PREDEFINED_CURRENCIES:
+            if code in default_rates:
+                initial_rates.append((code, default_rates[code]))
+            elif code == DEFAULT_SETTINGS["base_currency"]:
+                initial_rates.append((code, 1.0))
+
+        if initial_rates:
+            conn.executemany(
+                "INSERT OR IGNORE INTO exchange_rates (currency, rate) VALUES (?, ?)",
+                initial_rates,
+            )
 
 
 def _create_base_tables(conn):

@@ -1,9 +1,8 @@
-# app/utils/recalculate.py
 from app.db.connection import get_db_connection
 from app.services.converter import get_conversion_rates, convert_to_base
 
 
-def recalculate_all_conversions() -> (int, int):
+def recalculate_all_conversions() -> (int, int): # type: ignore
     """
     Updates all historical transactions and recurring patterns with
     the latest exchange rates saved in the settings.
@@ -11,9 +10,8 @@ def recalculate_all_conversions() -> (int, int):
     Returns: (transactions_updated, recurring_updated)
     """
     conn = get_db_connection()
-    rates = get_conversion_rates()  # Get the currently saved rates
+    rates = get_conversion_rates()
 
-    # --- 1. Update Transactions ---
     tx_rows = conn.execute("SELECT id, amount, currency FROM transactions").fetchall()
     tx_to_update = []
     for row in tx_rows:
@@ -24,7 +22,6 @@ def recalculate_all_conversions() -> (int, int):
         "UPDATE transactions SET amount_converted = ? WHERE id = ?", tx_to_update
     )
 
-    # --- 2. Update Recurring Transactions ---
     rec_rows = conn.execute(
         "SELECT id, amount, currency FROM recurring_transactions"
     ).fetchall()

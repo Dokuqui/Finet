@@ -4,3 +4,8 @@ finet.db
 .venv
 venv/
 /backups
+*.log
+dist/
+build/
+*.egg-info/
+*.csv

@@ -1,6 +1,8 @@
 import csv
 import datetime
+import os
 import flet as ft
+import traceback
 
 from app.db.transactions import (
     add_transaction,
@@ -19,6 +21,8 @@ from app.db.recurring import (
     create_recurring,
     generate_due_transactions,
 )
+
+ERROR_COLOR = ft.Colors.RED_400
 
 # ----------------- Icon Catalog -----------------
 ICON_CHOICES = [
@@ -76,17 +80,163 @@ class UX:
     )
 
 
+def _handle_file_picker_result(
+    e: ft.FilePickerResultEvent, page: ft.Page, notify_func, export_func, import_func
+):
+    """
+    Handles results from both pick_files and save_file.
+    Requires page and notify function to be passed in.
+    """
+    print("[FilePicker] on_result triggered!")
+
+    if e.path:
+        print("[FilePicker] Detected save operation, calling export_func...")
+        export_func(e.path, page, notify_func)
+    elif e.files and len(e.files) > 0 and e.files[0].path:
+        print("[FilePicker] Detected pick operation, calling import_func...")
+        import_func(e.files[0].path, page, notify_func)
+    else:
+        print("[FilePicker] Operation cancelled.")
+        notify_func("Operation cancelled.", UX.MUTED)
+
+
+def export_to_csv(path, page, notify):
+    print(f"[Export CSV] Function called with path: {path}")
+    if not path:
+        notify("Export cancelled or no path selected.", UX.MUTED)
+        return
+    print(f"[Export CSV] Attempting to save to: {path}")
+    try:
+        txs = get_recent_transactions(limit=10000)
+        print(f"[Export CSV] Fetched {len(txs)} transactions.")
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(
+                ["date", "amount", "category", "account_id", "notes", "currency"]
+            )
+            for tx in txs:
+                writer.writerow(
+                    [
+                        tx.date,
+                        tx.amount,
+                        tx.category_name or "N/A",
+                        tx.account_id if tx.account_id is not None else "N/A",
+                        tx.notes or "",
+                        tx.currency,
+                    ]
+                )
+        print(f"[Export CSV] Successfully wrote {len(txs)} rows to {path}")
+        notify(
+            f"Exported {len(txs)} transactions to {os.path.basename(path)}", UX.POSITIVE
+        )
+    except Exception as ex:
+        print("-" * 20)
+        print("[Export CSV] Error occurred:")
+        print(f"   Path: {path}")
+        print(f"   Error Type: {type(ex).__name__}")
+        print(f"   Error Details: {ex}")
+        traceback.print_exc()
+        print("-" * 20)
+        notify(
+            f"Export Error: {type(ex).__name__} - Check console.",
+            ERROR_COLOR,
+            duration=5000,
+        )
+
+
+def import_from_csv(path, page, notify):
+    print(f"[Import CSV] Function called with path: {path}")
+    if not path:
+        notify("No file selected", UX.MUTED)
+        return
+    try:
+        imported, skipped = 0, 0
+        all_categories = get_categories()
+        cat_map_by_name = {c["name"].lower(): c for c in all_categories}
+        other_cat_id = get_category_id_by_name("Other")
+        if other_cat_id is None:
+            print(
+                "[Import CSV] Warning: 'Other' category not found. Skipped rows might increase."
+            )
+
+        with open(path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            processed_rows = []
+            for row in reader:
+                processed_rows.append(row)
+
+        print(f"[Import CSV] Read {len(processed_rows)} rows from file.")
+
+        for row in processed_rows:
+            cat_name = row.get("category", "").strip().lower()
+            category = cat_map_by_name.get(cat_name)
+            cat_id = category["id"] if category else other_cat_id
+
+            if not category and other_cat_id is None:
+                print(
+                    f"[Import CSV] Skipping row due to missing category '{cat_name}' and no 'Other' fallback. Row: {row}"
+                )
+                skipped += 1
+                continue
+            elif not category:
+                skipped += 1
+
+            try:
+                amt = float(row["amount"])
+                acc_id_str = row.get("account_id") or row.get("account")
+                if not acc_id_str:
+                    raise ValueError("Missing account_id/account column")
+                acc_id = int(acc_id_str.strip())
+                currency = row.get("currency", "").strip().upper()
+                if not currency:
+                    raise ValueError("Missing currency column")
+                date_str = row.get("date", "").strip()
+                if not date_str:
+                    raise ValueError("Missing date column")
+                datetime.date.fromisoformat(date_str)
+
+                add_transaction(
+                    date_str,
+                    amt,
+                    cat_id,
+                    acc_id,
+                    row.get("notes", "").strip(),
+                    currency,
+                )
+                increment_account_balance(acc_id, currency, amt)
+                imported += 1
+            except Exception as row_ex:
+                print(f"[Import CSV] Skipping row due to error: {row_ex} | Row: {row}")
+                skipped += 1
+
+        print(f"[Import CSV] Processed: {imported} imported, {skipped} skipped.")
+        notify(f"Import complete: {imported} added, {skipped} skipped.", UX.ACCENT)
+
+    except FileNotFoundError:
+        print(f"[Import CSV] Error: File not found at {path}")
+        notify("Import Error: File not found.", ERROR_COLOR, duration=5000)
+    except Exception as ex:
+        print(f"[Import CSV] Error: {ex}")
+        traceback.print_exc()
+        notify(
+            f"Import Error: {type(ex).__name__} - Check console/logs.",
+            ERROR_COLOR,
+            duration=5000,
+        )
+
+
 # ----------------- Main Page -----------------
-def transactions_page(page: ft.Page):
+def transactions_page(page: ft.Page, file_picker: ft.FilePicker):
     page.bgcolor = UX.BG
     page.padding = 0
 
     # ---------- Snackbar helper ----------
-    def notify(msg: str, color=UX.ACCENT):
-        page.snack_bar = ft.SnackBar(ft.Text(msg), bgcolor=color)
+    def notify(msg: str, color=UX.ACCENT, duration=3000):
+        if not page:
+            return
+        page.snack_bar = ft.SnackBar(ft.Text(msg), bgcolor=color, duration=duration)
         page.snack_bar.open = True
-        if page:
-            page.update()
+        page.update()
 
     # ---------- Category Data ----------
     def fetch_categories():
@@ -899,83 +1049,69 @@ def transactions_page(page: ft.Page):
     )
 
     # ---------- Import / Export ----------
-    file_picker = ft.FilePicker()
-    page.overlay.append(file_picker)
-
-    def export_to_csv(path):
+    def export_to_csv(path, pg):
+        print(f"[Export CSV] Function called with path: {path}")
         if not path:
-            notify("Export cancelled", UX.MUTED)
+            pg.snack_bar = ft.SnackBar(ft.Text("Export cancelled..."), bgcolor=UX.MUTED)
+            pg.snack_bar.open = True
+            pg.update()
             return
+        print(f"[Export CSV] Attempting to save to: {path}")
         try:
             txs = get_recent_transactions(limit=10000)
+            print(f"[Export CSV] Fetched {len(txs)} transactions.")
             with open(path, "w", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
-                writer.writerow(
-                    ["date", "amount", "category", "account", "notes", "currency"]
-                )
+                writer.writerow([...])
+
                 for tx in txs:
-                    writer.writerow(
-                        [
-                            tx.date,
-                            tx.amount,
-                            tx.category_name,
-                            tx.account_id,
-                            tx.notes,
-                            tx.currency,
-                        ]
-                    )
-            notify(f"Exported {len(txs)} tx → {path}", UX.POSITIVE)
+                    writer.writerow([...])
+            print(f"[Export CSV] Successfully wrote {len(txs)} rows to {path}")
+
+            pg.snack_bar = ft.SnackBar(
+                ft.Text(f"Exported {len(txs)} to {os.path.basename(path)}"),
+                bgcolor=UX.POSITIVE,
+            )
+            pg.snack_bar.open = True
+            pg.update()
         except Exception as ex:
-            notify(f"Export error: {ex}", UX.NEGATIVE)
+            print(f"[Export CSV] Error: {ex}")
+            traceback.print_exc()
 
-    def import_from_csv(path):
-        if not path:
-            notify("No file selected", UX.MUTED)
-            return
-        try:
-            imported, skipped = 0, 0
-            all_categories = fetch_categories()
-            cat_map_by_name = {c["name"].lower(): c for c in all_categories}
-            other_cat_id = get_category_id_by_name("Other")
+            pg.snack_bar = ft.SnackBar(
+                ft.Text(f"Export Error: {type(ex).__name__}"),
+                bgcolor=ft.Colors.RED_400,
+                duration=5000,
+            )
+            pg.snack_bar.open = True
+            pg.update()
 
-            with open(path, "r", encoding="utf-8") as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    cat_name = row.get("category", "").lower()
-                    category = cat_map_by_name.get(cat_name)
+    import_button = ft.ElevatedButton(
+        "Import CSV",
+        icon=ft.Icons.FILE_UPLOAD,
+        bgcolor=UX.SURFACE_ALT,
+        color=UX.ACCENT,
+        on_click=lambda _: file_picker.pick_files(
+            dialog_title="Select CSV to Import",
+            allow_multiple=False,
+            allowed_extensions=["csv"],
+        ),
+        style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=UX.R_MD)),
+        height=40,
+    )
 
-                    cat_id = None
-                    if category:
-                        cat_id = category["id"]
-                    else:
-                        cat_id = other_cat_id
-                        skipped += 1
-
-                    try:
-                        amt = float(row["amount"])
-
-                        add_transaction(
-                            row["date"],
-                            amt,
-                            cat_id,
-                            int(row["account"]),
-                            row.get("notes", ""),
-                            row["currency"],
-                        )
-                        increment_account_balance(
-                            int(row["account"]), row["currency"], amt
-                        )
-                        imported += 1
-                    except Exception:
-                        skipped += 1
-            refresh_transactions()
-            notify(f"Import complete: {imported} ok, {skipped} skipped", UX.ACCENT)
-        except Exception as ex:
-            notify(f"Import error: {ex}", UX.NEGATIVE)
-
-    file_picker.on_save = lambda e: export_to_csv(e.path)
-    file_picker.on_result = lambda e: import_from_csv(
-        e.files[0].path if e.files and e.files[0].path else None
+    export_button = ft.ElevatedButton(
+        "Export CSV",
+        icon=ft.Icons.FILE_DOWNLOAD,
+        bgcolor=UX.SURFACE_ALT,
+        color=UX.ACCENT,
+        on_click=lambda _: file_picker.save_file(
+            dialog_title="Save Transactions CSV",
+            file_name="transactions.csv",
+            allowed_extensions=["csv"],
+        ),
+        style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=UX.R_MD)),
+        height=40,
     )
 
     # ---------- Utility Panel ----------
@@ -1011,32 +1147,8 @@ def transactions_page(page: ft.Page):
                 ft.Divider(
                     height=24, color=ft.Colors.with_opacity(0.05, ft.Colors.BLACK)
                 ),
-                ft.ElevatedButton(
-                    "Import CSV",
-                    icon=ft.Icons.FILE_UPLOAD,
-                    bgcolor=UX.SURFACE_ALT,
-                    color=UX.ACCENT,
-                    on_click=lambda e: file_picker.pick_files(
-                        allow_multiple=False, allowed_extensions=["csv"]
-                    ),
-                    style=ft.ButtonStyle(
-                        shape=ft.RoundedRectangleBorder(radius=UX.R_MD),
-                    ),
-                    height=40,
-                ),
-                ft.ElevatedButton(
-                    "Export CSV",
-                    icon=ft.Icons.FILE_DOWNLOAD,
-                    bgcolor=UX.SURFACE_ALT,
-                    color=UX.ACCENT,
-                    on_click=lambda e: file_picker.save_file(
-                        file_name="transactions.csv", allowed_extensions=["csv"]
-                    ),
-                    style=ft.ButtonStyle(
-                        shape=ft.RoundedRectangleBorder(radius=UX.R_MD),
-                    ),
-                    height=40,
-                ),
+                import_button,
+                export_button,
             ],
             spacing=16,
             alignment=ft.MainAxisAlignment.START,
