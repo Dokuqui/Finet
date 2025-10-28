@@ -331,39 +331,6 @@ def build_accounts_section(accounts) -> ft.Control:
         alignment=ft.MainAxisAlignment.START,
     )
 
-    currency_row = ft.Row(
-        [
-            ft.Row(
-                [
-                    ft.Container(
-                        ft.Column(
-                            [
-                                ft.Text(cur, size=11, color=THEME.TEXT_MUTED),
-                                ft.Text(
-                                    fmt_number(amt, with_symbol=False),
-                                    size=17,
-                                    weight=ft.FontWeight.BOLD,
-                                    color=THEME.POSITIVE
-                                    if amt >= 0
-                                    else THEME.NEGATIVE,
-                                ),
-                            ],
-                            spacing=2,
-                        ),
-                        padding=ft.padding.all(10),
-                        bgcolor=THEME.SURFACE_SUBTLE,
-                        border_radius=THEME.R_MD,
-                        margin=ft.margin.only(right=8, bottom=8),
-                    )
-                    for cur, amt in currency_totals.items()
-                ],
-                wrap=True,
-                spacing=4,
-            )
-        ],
-        alignment=ft.MainAxisAlignment.START,
-    )
-
     acc_cards = []
     for i, acc in enumerate(accounts):
         color = THEME.CHART_COLORS[i % len(THEME.CHART_COLORS)]
