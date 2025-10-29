@@ -26,6 +26,10 @@ from app.ui.util import (
     EXAMPLE_CSV_FULL,
 )
 
+# --- FIX: Moved this import to the top ---
+from app.services.converter import get_active_currency_codes
+# --- END FIX ---
+
 ERROR_COLOR = ft.Colors.RED_400
 
 # ----------------- Icon Catalog -----------------
@@ -233,6 +237,7 @@ def import_from_csv(path, page, notify):
 def transactions_page(page: ft.Page, file_picker: ft.FilePicker):
     page.bgcolor = UX.BG
     page.padding = 0
+    print("[TransactionsPage] Rebuilding page content...")  # Helpful for debugging
 
     # ---------- Snackbar helper ----------
     def notify(msg: str, color=UX.ACCENT, duration=3000):
@@ -368,20 +373,32 @@ def transactions_page(page: ft.Page, file_picker: ft.FilePicker):
     # ---------- Account -> Currency dynamic ----------
     def on_account_change(e):
         val = account_field.value
+        currency_field.options = []
+        currency_field.value = None
+
         if not val:
-            currency_field.options = []
-            currency_field.value = None
             page.update()
             return
+
         acc = next((a for a in accounts if str(a.id) == val), None)
-        if acc:
+        if acc and acc.balances:
             currency_field.options = [
                 ft.dropdown.Option(b["currency"]) for b in acc.balances
             ]
-            currency_field.value = acc.balances[0]["currency"] if acc.balances else None
-        else:
-            currency_field.options = []
-            currency_field.value = None
+            currency_field.value = acc.balances[0]["currency"]
+        elif acc and not acc.balances:
+            # --- THIS IS THE FIX ---
+            # This logic is correct. We just moved the import to the top.
+            try:
+                active_codes = get_active_currency_codes()
+                currency_field.options = [ft.dropdown.Option(c) for c in active_codes]
+            except Exception as ex:
+                print(f"Warning: Could not import get_active_currency_codes: {ex}")
+                currency_field.options = [
+                    ft.dropdown.Option("EUR"),
+                    ft.dropdown.Option("USD"),
+                ]
+            # --- END FIX ---
         page.update()
 
     account_field.on_change = on_account_change
@@ -915,6 +932,20 @@ def transactions_page(page: ft.Page, file_picker: ft.FilePicker):
         if transaction_list.page:
             transaction_list.update()
 
+    # ------------------ Refresh Function ------------------
+    def refresh_page_data():
+        nonlocal accounts
+        accounts = get_accounts()
+
+        account_field.options = [
+            ft.dropdown.Option(str(a.id), f"{a.name} ({a.type})") for a in accounts
+        ]
+
+        on_account_change(None)
+
+        if page:
+            page.update()
+
     # ---------- Add Transaction Logic ----------
     def reset_form():
         amount_field.value = "0.00"
@@ -1180,7 +1211,7 @@ def transactions_page(page: ft.Page, file_picker: ft.FilePicker):
                 ),
                 import_button,
                 export_button,
-                show_example_button
+                show_example_button,
             ],
             spacing=16,
             alignment=ft.MainAxisAlignment.START,

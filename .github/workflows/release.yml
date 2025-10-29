@@ -1,0 +1,68 @@
+name: Build and Release
+
+# This workflow runs when you "publish" a new Release on GitHub
+on:
+    release:
+        types: [published]
+
+jobs:
+    build:
+        name: Build for ${{ matrix.platform }}
+
+        strategy:
+            matrix:
+                include:
+                    - platform: windows
+                      os: windows-latest
+                    - platform: macos
+                      os: macos-latest
+
+        runs-on: ${{ matrix.os }}
+
+        steps:
+            - name: Check out code
+              uses: actions/checkout@v4
+
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.11"
+
+            - name: Install Flet
+              run: pip install flet
+
+            - name: Build Flet app
+              run: flet build ${{ matrix.platform }} --verbose
+
+            - name: Upload Build Artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: flet-app-${{ matrix.platform }}
+                  path: build/${{ matrix.platform }}/*.zip
+                  if-no-files-found: error
+
+    publish:
+        name: Publish to Release
+
+        needs: [build]
+        runs-on: ubuntu-latest
+
+        permissions:
+            contents: write
+
+        steps:
+            - name: Download all build artifacts
+              uses: actions/download-artifact@v4
+              with:
+                  path: build-artifacts
+
+            - name: List files (for debugging)
+              run: ls -R build-artifacts
+
+            - name: Upload assets to GitHub Release
+              uses: softprops/action-gh-release@v2
+              with:
+                  files: |
+                      build-artifacts/flet-app-windows/*.zip
+                      build-artifacts/flet-app-macos/*.zip
+                  fail_on_unmatched_files: true

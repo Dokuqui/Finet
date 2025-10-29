@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "finet"
-version = "0.1.0"
+version = "1.0.0"
 description = "A modern, cross-platform personal finance tracker built with Python and Flet."
-requires-python = ">=3.14"
+requires-python = ">=3.11"
 dependencies = [
-    "flet>=0.21.0",
+    "flet>=0.28.0",
     "matplotlib>=3.10.3",
     "pandas>=2.3.1",
     "pillow>=11.3.0",
@@ -16,9 +16,22 @@ dependencies = [
 ]
 
 [project.scripts]
-finet = "app.main:main"
+finet = "main:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["app*"]
 exclude = ["tests*"]
+
+[tool.flet.build]
+module_name = "main"
+product_name = "Finet"
+include_files = [
+    "assets/finet.db"
+]
+
+[tool.flet."build.windows"]
+icon = "assets/icon/Finet_Icon.ico"
+
+[tool.flet."build.macos"]
+icon = "assets/icon/Finet_Icon_Mac.icns"

@@ -6,8 +6,8 @@ import flet as ft
 from decimal import Decimal, InvalidOperation
 
 from app.utils.backup import backup_db, restore_db
-from app.db.connection import DB_PATH
 from app.db import settings as db_settings
+from app.db.connection import get_db_path
 from app.services.converter import (
     get_active_currency_codes,
     get_currency_symbol,
@@ -498,7 +498,7 @@ def settings_page(page: ft.Page) -> ft.Control:
             passph = None
         out_dir = os.path.dirname(out_path) or "."
         os.makedirs(out_dir, exist_ok=True)
-        db_path = DB_PATH
+        db_path = get_db_path()
         if not os.path.exists(db_path):
             notify(f"Database not found at {db_path}", ft.Colors.RED_400)
             return
@@ -513,7 +513,7 @@ def settings_page(page: ft.Page) -> ft.Control:
             notify("Backup file does not exist", ft.Colors.RED_400)
             return
         passph = restore_passphrase.value.strip() or None
-        db_path = DB_PATH
+        db_path = get_db_path()
         notify("Starting restore...", ft.Colors.GREY_700)
         _run_in_thread(_restore_backup_worker, in_path, db_path, passph)
 

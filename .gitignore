@@ -1,4 +1,5 @@
 finet.db
+__pycache__
 */__pycache__
 */**/__pycache__
 .venv
@@ -11,3 +12,4 @@ build/
 *.csv
 .ruff_cache
 Finet.spec
+.env

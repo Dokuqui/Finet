@@ -1,16 +1,70 @@
 import sqlite3
-import os
 import datetime
 from app.services.currency_info import PREDEFINED_CURRENCIES
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "finet.db")
+_DB_PATH = None
+
+
+def get_db_path():
+    """
+    Returns the initialized database path.
+    Raises an error if init_db() has not been called.
+    """
+    if _DB_PATH is None:
+        raise ValueError(
+            "Database path has not been initialized. Call init_db() from main.py first."
+        )
+    return _DB_PATH
 
 
 def get_db_connection():
-    conn = sqlite3.connect(DB_PATH)
+    """
+    Gets a new database connection using the path
+    set by init_db().
+    """
+    if _DB_PATH is None:
+        raise ValueError(
+            "Database path has not been initialized. Call init_db() from main.py first."
+        )
+
+    conn = sqlite3.connect(_DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
+
+
+def init_db(database_path: str):
+    """
+    Initializes the database path and creates/upgrades all tables.
+    This MUST be called by startup.py before get_db_connection() is used.
+    """
+    global _DB_PATH
+    _DB_PATH = database_path
+
+    print(f"[DB] Database path set to: {_DB_PATH}")
+
+    try:
+        with get_db_connection() as conn:
+            print("[DB] Database connection verified. Initializing schema...")
+
+            _create_base_tables(conn)
+            _init_settings_table(conn)
+            _ensure_categories_type_column(conn)
+            _ensure_balances_threshold_column(conn)
+            _ensure_transactions_converted_column(conn)
+            _ensure_recurring_table(conn)
+            _ensure_recurring_columns(conn)
+            _ensure_transactions_indexes(conn)
+
+            conn.commit()
+
+        print(
+            "[schema] Database initialized / upgraded at",
+            datetime.datetime.utcnow().isoformat(),
+        )
+    except Exception as e:
+        print(f"[DB] Error during database initialization: {e}")
+        raise
 
 
 # ---------- Schema helpers ----------
@@ -241,21 +295,3 @@ def _ensure_transactions_indexes(conn):
         CREATE INDEX IF NOT EXISTS idx_transactions_recurring
         ON transactions(recurring_id)
     """)
-
-
-def init_db():
-    conn = get_db_connection()
-    _create_base_tables(conn)
-    _init_settings_table(conn)
-    _ensure_categories_type_column(conn)
-    _ensure_balances_threshold_column(conn)
-    _ensure_transactions_converted_column(conn)
-    _ensure_recurring_table(conn)
-    _ensure_recurring_columns(conn)
-    _ensure_transactions_indexes(conn)
-    conn.commit()
-    conn.close()
-    print(
-        "[schema] Database initialized / upgraded at",
-        datetime.datetime.utcnow().isoformat(),
-    )
