@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-finet = "main:main"
+finet = "app.main:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -24,14 +24,14 @@ include = ["app*"]
 exclude = ["tests*"]
 
 [tool.flet.build]
-module_name = "main"
+module_name = "app.main"
 product_name = "Finet"
 include_files = [
-    "assets/finet.db"
+    "app/assets/finet.db"
 ]
 
 [tool.flet."build.windows"]
-icon = "assets/icon/Finet_Icon.ico"
+icon = "app/assets/icon/finet.png"
 
 [tool.flet."build.macos"]
-icon = "assets/icon/Finet_Icon_Mac.icns"
+icon = "app/assets/icon/finet.png"

@@ -20,12 +20,12 @@ def main(page: ft.Page):
 
     base_dir = getattr(page, "app_directory", None) or os.getcwd()
 
-    assets_dir = os.path.join(base_dir, "assets")
+    app_dir_relative_to_base = "app"
+
+    assets_dir = os.path.join(base_dir, app_dir_relative_to_base, "assets")
     os.makedirs(assets_dir, exist_ok=True)
 
     db_path = os.path.join(assets_dir, db_name)
-
-    print(f"[Main] Using database path: {db_path}")
 
     initialize(db_path)
     page.title = "Finet - Personal Finance Tracker"
