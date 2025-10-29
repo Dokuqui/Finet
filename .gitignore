@@ -9,3 +9,5 @@ dist/
 build/
 *.egg-info/
 *.csv
+.ruff_cache
+Finet.spec

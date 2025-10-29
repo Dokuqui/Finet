@@ -1,3 +1,5 @@
+import os
+import sys
 import flet as ft
 from app.startup import initialize
 from app.ui.dashboard import dashboard_page
@@ -92,4 +94,12 @@ def main(page: ft.Page):
 
 
 if __name__ == "__main__":
-    ft.app(target=main)
+    view = ft.FLET_APP
+
+    args = sys.argv[1:]
+    if "--web" in args or os.getenv("FLET_VIEW") == "web":
+        view = ft.WEB_BROWSER
+    elif "--headless" in args:
+        view = None 
+
+    ft.app(target=main, view=view, port=8550)
