@@ -54,7 +54,7 @@ This is the simplest way to run Finet without installing Python or dependencies 
 2. **Run the Finet Image:** Open your terminal or command prompt and run the following command. Replace `your-github-username` with your actual GitHub username and `latest` or a specific version tag (e.g., `1.0.0`):
 
     ```bash
-    docker run -d --name finet-app -p 8550:8550 -v finet_data:/app/app/db ghcr.io/your-github-username/finet:latest
+    docker run -d --name finet-app -p 8550:8550 -v finet_data:/app/app/db ghcr.io/dokuqui/finet:latest
     ```
 
     * `-d`: Run in detached mode.
