@@ -16,7 +16,18 @@ from app.ui.settings import settings_page
 
 
 def main(page: ft.Page):
-    initialize()
+    db_name = "finet.db"
+
+    base_dir = getattr(page, "app_directory", None) or os.getcwd()
+
+    assets_dir = os.path.join(base_dir, "assets")
+    os.makedirs(assets_dir, exist_ok=True)
+
+    db_path = os.path.join(assets_dir, db_name)
+
+    print(f"[Main] Using database path: {db_path}")
+
+    initialize(db_path)
     page.title = "Finet - Personal Finance Tracker"
     page.bgcolor = ft.Colors.GREY_50
 
@@ -43,8 +54,13 @@ def main(page: ft.Page):
 
     def on_tab_change(e):
         idx = tabs.selected_index
-        if tabs.tabs[idx].content is None:
+        
+        tabs_to_refresh = [1, 2] 
+
+        if tabs.tabs[idx].content is None or idx in tabs_to_refresh:
+            print(f"[Tabs] Regenerating content for tab index {idx}")
             tabs.tabs[idx].content = tab_content_generators[idx](page)
+        
         page.update()
 
     tabs = ft.Tabs(
@@ -100,6 +116,6 @@ if __name__ == "__main__":
     if "--web" in args or os.getenv("FLET_VIEW") == "web":
         view = ft.WEB_BROWSER
     elif "--headless" in args:
-        view = None 
+        view = None
 
     ft.app(target=main, view=view, port=8550)

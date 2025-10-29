@@ -79,9 +79,9 @@ This is the simplest way to run Finet without installing Python or dependencies 
  ```bash
     git clone [https://github.com/your-github-username/Finet.git](https://github.com/your-github-username/Finet.git)
     cd Finet
-    python -m app.main # will be running in dekstop mode
-    python -m app.main --web # for web mode
-    python -m app.main --headless # for headless mode
+    python -m main # will be running in dekstop mode
+    python -m main --web # for web mode
+    python -m main --headless # for headless mode
    ```
 
 ### Method 3: Download from GitHub Releases (Desktop App)

@@ -7,11 +7,11 @@ RUN pip install --no-cache-dir --root-user-action=ignore -r requirements.txt
 
 COPY pyproject.toml .
 COPY app ./app
-
-RUN mkdir -p /app/app/db
+COPY main.py .
+COPY assets ./assets
 
 ENV FLET_VIEW=web
 
 EXPOSE 8550
 
-CMD ["python", "-m", "app.main"]
+CMD ["python", "-m", "main.py"]
