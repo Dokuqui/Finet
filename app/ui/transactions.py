@@ -21,6 +21,10 @@ from app.db.recurring import (
     create_recurring,
     generate_due_transactions,
 )
+from app.ui.util import (
+    EXAMPLE_CSV_EXPLANATIONS,
+    EXAMPLE_CSV_FULL,
+)
 
 ERROR_COLOR = ft.Colors.RED_400
 
@@ -1048,44 +1052,63 @@ def transactions_page(page: ft.Page, file_picker: ft.FilePicker):
         height=46,
     )
 
+    # --- CSV Example Dialog ---
+    example_csv_dialog = ft.AlertDialog(
+        modal=True,
+        title=ft.Text("Import CSV Format Example"),
+        content=ft.Column(
+            [
+                ft.Text(
+                    "Use this format for your CSV file. The header row is required.",
+                    size=13,
+                ),
+                ft.TextField(
+                    value=EXAMPLE_CSV_FULL,
+                    multiline=True,
+                    read_only=True,
+                    border_color=UX.BORDER,
+                    height=150,  # Adjust height as needed
+                    text_size=12,
+                ),
+                ft.ElevatedButton(
+                    "Copy Example Data to Clipboard",
+                    icon=ft.Icons.COPY,
+                    on_click=lambda _: (
+                        page.set_clipboard(EXAMPLE_CSV_FULL),
+                        notify("Example CSV copied!", UX.POSITIVE),
+                    ),
+                ),
+                ft.Divider(height=10),
+                ft.Markdown(  # Use Markdown for explanations
+                    EXAMPLE_CSV_EXPLANATIONS,
+                    selectable=True,
+                    extension_set=ft.MarkdownExtensionSet.COMMON_MARK,
+                ),
+            ],
+            tight=True,  # Make column fit content vertically
+            scroll="auto",  # Allow scrolling if content overflows vertically
+            width=600,  # Set a reasonable width
+        ),
+        actions=[
+            ft.TextButton("Close", on_click=lambda _: close_example_dialog()),
+        ],
+        actions_alignment=ft.MainAxisAlignment.END,
+    )
+
+    def open_example_dialog(e=None):
+        if (
+            example_csv_dialog not in page.overlay
+        ):  # Ensure dialog is added if not already
+            page.overlay.append(example_csv_dialog)
+        page.dialog = example_csv_dialog
+        example_csv_dialog.open = True
+        page.update()
+
+    def close_example_dialog(e=None):
+        example_csv_dialog.open = False
+        page.update()
+
     # ---------- Import / Export ----------
-    def export_to_csv(path, pg):
-        print(f"[Export CSV] Function called with path: {path}")
-        if not path:
-            pg.snack_bar = ft.SnackBar(ft.Text("Export cancelled..."), bgcolor=UX.MUTED)
-            pg.snack_bar.open = True
-            pg.update()
-            return
-        print(f"[Export CSV] Attempting to save to: {path}")
-        try:
-            txs = get_recent_transactions(limit=10000)
-            print(f"[Export CSV] Fetched {len(txs)} transactions.")
-            with open(path, "w", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow([...])
-
-                for tx in txs:
-                    writer.writerow([...])
-            print(f"[Export CSV] Successfully wrote {len(txs)} rows to {path}")
-
-            pg.snack_bar = ft.SnackBar(
-                ft.Text(f"Exported {len(txs)} to {os.path.basename(path)}"),
-                bgcolor=UX.POSITIVE,
-            )
-            pg.snack_bar.open = True
-            pg.update()
-        except Exception as ex:
-            print(f"[Export CSV] Error: {ex}")
-            traceback.print_exc()
-
-            pg.snack_bar = ft.SnackBar(
-                ft.Text(f"Export Error: {type(ex).__name__}"),
-                bgcolor=ft.Colors.RED_400,
-                duration=5000,
-            )
-            pg.snack_bar.open = True
-            pg.update()
-
     import_button = ft.ElevatedButton(
         "Import CSV",
         icon=ft.Icons.FILE_UPLOAD,
@@ -1112,6 +1135,14 @@ def transactions_page(page: ft.Page, file_picker: ft.FilePicker):
         ),
         style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=UX.R_MD)),
         height=40,
+    )
+
+    show_example_button = ft.TextButton(
+        "Show CSV Example",
+        icon=ft.Icons.INFO_OUTLINE,
+        tooltip="View the required CSV format for importing",
+        on_click=open_example_dialog,
+        # style=ft.ButtonStyle(color=UX.MUTED), # Optional styling
     )
 
     # ---------- Utility Panel ----------
@@ -1149,6 +1180,7 @@ def transactions_page(page: ft.Page, file_picker: ft.FilePicker):
                 ),
                 import_button,
                 export_button,
+                show_example_button
             ],
             spacing=16,
             alignment=ft.MainAxisAlignment.START,

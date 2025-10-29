@@ -48,7 +48,7 @@ Finet offers a comprehensive set of tools to manage your personal finances effec
 
 ### Method 1: Using Docker (Recommended for ease of use)
 
-This is the simplest way to run Finet without installing Python or dependencies manually.
+This is the simplest way to run Finet without installing Python or dependencies manually(**Note:** This will run in web version).
 
 1. **Install Docker:** Get Docker Desktop for your OS from [docker.com](https://www.docker.com/products/docker-desktop/).
 2. **Run the Finet Image:** Open your terminal or command prompt and run the following command. Replace `your-github-username` with your actual GitHub username and `latest` or a specific version tag (e.g., `1.0.0`):
@@ -79,11 +79,17 @@ This is the simplest way to run Finet without installing Python or dependencies 
  ```bash
     git clone [https://github.com/your-github-username/Finet.git](https://github.com/your-github-username/Finet.git)
     cd Finet
-    python -m venv venv
-    source venv/bin/activate  # On Windows: venv\Scripts\activate
-    pip install -e .
-    finet # Run the app from the project directory
+    python -m app.main # will be running in dekstop mode
+    python -m app.main --web # for web mode
+    python -m app.main --headless # for headless mode
    ```
+
+### Method 3: Download from GitHub Releases (Desktop App)
+
+* Go to the page of this repository.
+* Find the latest release (e.g., v1.0.0).
+* Under Assets, download file
+* Run the Finet.exe (or equivalent)
 
 ---
 
